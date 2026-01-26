@@ -1,11 +1,18 @@
 package keychain
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/zalando/go-keyring"
 )
+
+func TestMain(m *testing.M) {
+	keyring.MockInit()
+	os.Exit(m.Run())
+}
 
 func TestKeychain_RoundTrip(t *testing.T) {
 	// Use a unique test username to avoid conflicts
