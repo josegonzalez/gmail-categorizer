@@ -1,0 +1,47 @@
+# Gmail Categorizer Configuration
+# Copy to ~/.gmail-categorizer.yaml or ./gmail-categorizer.yaml
+
+imap:
+  # Gmail IMAP server (default: imap.gmail.com)
+  server: imap.gmail.com
+  port: 993
+
+  # Your Gmail address
+  username: your-email@gmail.com
+
+  # App Password - for security, prefer setting via:
+  #   - Environment variable: GMAIL_CATEGORIZER_IMAP_PASSWORD
+  #   - Interactive prompt (leave this commented out)
+  # password: your-16-char-app-password
+
+  # Mailbox to analyze (default: INBOX)
+  # For all mail: "[Gmail]/All Mail"
+  mailbox: INBOX
+
+  # Connection timeout
+  timeout: 30s
+
+output:
+  # Output format: table, json, csv
+  format: table
+
+  # Sort field: count, address
+  sort_by: count
+
+  # Sort order: asc, desc
+  sort_order: desc
+
+  # Limit results (0 = unlimited)
+  limit: 0
+
+special:
+  # Addresses that trigger grouping by sender instead of recipient
+  # Useful for catch-all inboxes where certain addresses receive
+  # emails from many different senders
+  group_by_from:
+    - admin@
+    - hi@
+    - email@
+    - support@
+    - info@
+    - contact@
