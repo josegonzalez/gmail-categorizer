@@ -1,5 +1,7 @@
 .pass
 coverage.out
 coverage.html
-gmail-categorizer
-bin/
+/gmail-categorizer
+/bin
+/dist
+/gmail-categorizer.yaml
