@@ -1086,6 +1086,73 @@ func TestModel_Update_LoadingOtherKey(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
+func TestModel_HandleSubjectsKeys_Sort(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewSubjects
+	model.selectedGrouping = &triage.Grouping{
+		Messages: []*imap.Message{
+			{Subject: "B"},
+			{Subject: "A"},
+		},
+	}
+
+	// First press: cycle from SortDateDesc to SortDateAsc
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}
+	newModel, _ := model.handleSubjectsKeys(msg)
+	m := newModel.(Model)
+	assert.Equal(t, SortDateAsc, m.subjectsSortMode)
+	assert.Equal(t, 0, m.subjectsCursor)
+
+	// Second press: SortSubjectAsc
+	newModel, _ = m.handleSubjectsKeys(msg)
+	m = newModel.(Model)
+	assert.Equal(t, SortSubjectAsc, m.subjectsSortMode)
+
+	// Third press: SortSubjectDesc
+	newModel, _ = m.handleSubjectsKeys(msg)
+	m = newModel.(Model)
+	assert.Equal(t, SortSubjectDesc, m.subjectsSortMode)
+
+	// Fourth press: wraps back to SortDateDesc
+	newModel, _ = m.handleSubjectsKeys(msg)
+	m = newModel.(Model)
+	assert.Equal(t, SortDateDesc, m.subjectsSortMode)
+}
+
+func TestModel_SortModeDefaultOnMessageLoad(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewLoading
+	model.selectedGrouping = &triage.Grouping{
+		Messages: []*imap.Message{
+			{Subject: "Test"},
+		},
+	}
+
+	msg := messagesLoadedMsg{}
+	newModel, _ := model.Update(msg)
+	m := newModel.(Model)
+	assert.Equal(t, SortDateDesc, m.subjectsSortMode)
+}
+
+func TestModel_SortModeResetOnBack(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewSubjects
+	model.selectedGrouping = &triage.Grouping{Address: "test@example.com"}
+	model.subjectsSortMode = SortSubjectAsc
+
+	msg := tea.KeyMsg{Type: tea.KeyEsc}
+	newModel, _ := model.handleSubjectsKeys(msg)
+	m := newModel.(Model)
+	assert.Equal(t, ViewGroupings, m.view)
+	assert.Equal(t, SortDateDesc, m.subjectsSortMode)
+}
+
 func TestModel_Update_DefaultMsgType(t *testing.T) {
 	ctx := context.Background()
 	triager := &mockTriager{}

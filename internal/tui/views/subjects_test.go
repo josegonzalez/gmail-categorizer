@@ -16,7 +16,7 @@ func TestRenderSubjects(t *testing.T) {
 		{Subject: "Third Subject"},
 	}
 
-	result := RenderSubjects("test@example.com", messages, 1, 80, 24)
+	result := RenderSubjects("test@example.com", messages, 1, 80, 24, "date ↓")
 
 	// Check title
 	assert.Contains(t, result, "Messages for test@example.com")
@@ -29,10 +29,23 @@ func TestRenderSubjects(t *testing.T) {
 	assert.Contains(t, result, "Second Subject")
 	assert.Contains(t, result, "Third Subject")
 
+	// Check sort indicator
+	assert.Contains(t, result, "sorted by date ↓")
+
 	// Check help text
 	assert.Contains(t, result, "navigate")
+	assert.Contains(t, result, "s sort")
 	assert.Contains(t, result, "archive")
 	assert.Contains(t, result, "back")
+}
+
+func TestRenderSubjects_SortIndicator(t *testing.T) {
+	messages := []*imap.Message{
+		{Subject: "Test"},
+	}
+
+	result := RenderSubjects("test@example.com", messages, 0, 80, 24, "subject A→Z")
+	assert.Contains(t, result, "sorted by subject A→Z")
 }
 
 func TestRenderSubjects_NoSubject(t *testing.T) {
@@ -40,7 +53,7 @@ func TestRenderSubjects_NoSubject(t *testing.T) {
 		{Subject: ""},
 	}
 
-	result := RenderSubjects("test@example.com", messages, 0, 80, 24)
+	result := RenderSubjects("test@example.com", messages, 0, 80, 24, "date ↓")
 
 	assert.Contains(t, result, "(no subject)")
 }
@@ -51,7 +64,7 @@ func TestRenderSubjects_Truncation(t *testing.T) {
 		{Subject: longSubject},
 	}
 
-	result := RenderSubjects("test@example.com", messages, 0, 80, 24)
+	result := RenderSubjects("test@example.com", messages, 0, 80, 24, "date ↓")
 
 	// Should contain truncation indicator
 	assert.Contains(t, result, "...")
@@ -62,7 +75,7 @@ func TestRenderSubjects_Truncation(t *testing.T) {
 func TestRenderSubjects_EmptyMessages(t *testing.T) {
 	messages := []*imap.Message{}
 
-	result := RenderSubjects("test@example.com", messages, 0, 80, 24)
+	result := RenderSubjects("test@example.com", messages, 0, 80, 24, "date ↓")
 
 	assert.Contains(t, result, "0 messages")
 }
@@ -73,7 +86,7 @@ func TestRenderSubjects_SmallWidth(t *testing.T) {
 	}
 
 	// Very small width - should use minimum
-	result := RenderSubjects("test@example.com", messages, 0, 10, 24)
+	result := RenderSubjects("test@example.com", messages, 0, 10, 24, "date ↓")
 	assert.Contains(t, result, "Messages for test@example.com")
 }
 
@@ -86,7 +99,7 @@ func TestRenderSubjects_CursorPositions(t *testing.T) {
 
 	// All cursor positions should render without error
 	for i := 0; i < 3; i++ {
-		result := RenderSubjects("test@example.com", messages, i, 80, 24)
+		result := RenderSubjects("test@example.com", messages, i, 80, 24, "date ↓")
 		assert.NotEmpty(t, result)
 	}
 }

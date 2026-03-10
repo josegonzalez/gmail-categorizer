@@ -10,12 +10,12 @@ import (
 )
 
 // RenderSubjects renders the subjects list view.
-func RenderSubjects(address string, messages []*imap.Message, cursor int, width, height int) string {
+func RenderSubjects(address string, messages []*imap.Message, cursor int, width, height int, sortLabel string) string {
 	var b strings.Builder
 
 	b.WriteString(styles.TitleStyle.Render(fmt.Sprintf("Messages for %s", address)))
 	b.WriteString("\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(styles.MutedColor).Render(fmt.Sprintf("%d messages", len(messages))))
+	b.WriteString(lipgloss.NewStyle().Foreground(styles.MutedColor).Render(fmt.Sprintf("%d messages • sorted by %s", len(messages), sortLabel)))
 	b.WriteString("\n\n")
 
 	visible := CalculateVisibleRange(len(messages), cursor, height, 8)
@@ -46,7 +46,7 @@ func RenderSubjects(address string, messages []*imap.Message, cursor int, width,
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.HelpStyle.Render("↑/↓ navigate • a archive all • esc back • q quit"))
+	b.WriteString(styles.HelpStyle.Render("↑/↓ navigate • s sort • a archive all • esc back • q quit"))
 
 	return b.String()
 }

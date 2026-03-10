@@ -43,6 +43,7 @@ type Model struct {
 	selectedGrouping *triage.Grouping
 	subjectsCursor   int
 	subjectsOffset   int
+	subjectsSortMode SortMode
 
 	// Confirm view
 	confirmAction string
@@ -107,6 +108,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messagesLoadedMsg:
 		m.view = ViewSubjects
+		if m.selectedGrouping != nil {
+			sortMessages(m.selectedGrouping.Messages, m.subjectsSortMode)
+		}
 		return m, nil
 
 	case archiveResultMsg:
@@ -196,6 +200,7 @@ func (m Model) handleSubjectsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "esc" || msg.String() == "backspace":
 		m.view = ViewGroupings
 		m.selectedGrouping = nil
+		m.subjectsSortMode = SortDateDesc
 
 	case msg.String() == "up" || msg.String() == "k":
 		if m.subjectsCursor > 0 {
@@ -205,6 +210,13 @@ func (m Model) handleSubjectsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "down" || msg.String() == "j":
 		if m.selectedGrouping != nil && m.subjectsCursor < len(m.selectedGrouping.Messages)-1 {
 			m.subjectsCursor++
+		}
+
+	case msg.String() == "s":
+		m.subjectsSortMode = (m.subjectsSortMode + 1) % 4
+		if m.selectedGrouping != nil {
+			sortMessages(m.selectedGrouping.Messages, m.subjectsSortMode)
+			m.subjectsCursor = 0
 		}
 
 	case msg.String() == "a":
@@ -329,7 +341,7 @@ func (m Model) View() string {
 		if m.selectedGrouping == nil {
 			return "No grouping selected"
 		}
-		return views.RenderSubjects(m.selectedGrouping.Address, m.selectedGrouping.Messages, m.subjectsCursor, m.width, m.height)
+		return views.RenderSubjects(m.selectedGrouping.Address, m.selectedGrouping.Messages, m.subjectsCursor, m.width, m.height, sortModeLabel(m.subjectsSortMode))
 
 	case ViewConfirm:
 		return views.RenderConfirm(m.selectedGrouping)
