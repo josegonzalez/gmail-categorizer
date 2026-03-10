@@ -67,4 +67,8 @@ var (
 
 	SpinnerStyle = lipgloss.NewStyle().
 			Foreground(PrimaryColor)
+
+	SpecialMarkerStyle = lipgloss.NewStyle().
+				Foreground(WarningColor).
+				Bold(true)
 )

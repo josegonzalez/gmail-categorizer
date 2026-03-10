@@ -8,10 +8,11 @@ import (
 
 // Grouping represents a collection of emails grouped by recipient address.
 type Grouping struct {
-	Address  string
-	Count    int
-	UIDs     []uint32
-	Messages []*imap.Message
+	Address      string
+	Count        int
+	UIDs         []uint32
+	Messages     []*imap.Message
+	GroupedByFrom bool
 }
 
 // DestinationFolder returns the archive folder path for this grouping.

@@ -47,8 +47,10 @@ func TestTriager_LoadGroupings_GroupByTo(t *testing.T) {
 	// Should be sorted by count descending
 	assert.Equal(t, 2, groupings[0].Count)
 	assert.Equal(t, "user1@example.com", groupings[0].Address)
+	assert.False(t, groupings[0].GroupedByFrom)
 	assert.Equal(t, 1, groupings[1].Count)
 	assert.Equal(t, "user2@example.com", groupings[1].Address)
+	assert.False(t, groupings[1].GroupedByFrom)
 }
 
 func TestTriager_LoadGroupings_EmptyInbox(t *testing.T) {
@@ -106,8 +108,10 @@ func TestTriager_LoadGroupings_GroupByFrom(t *testing.T) {
 	// Grouped by FROM address since FROM starts with "admin@"
 	assert.Equal(t, 2, groupings[0].Count)
 	assert.Equal(t, "admin@company.com", groupings[0].Address)
+	assert.True(t, groupings[0].GroupedByFrom)
 	assert.Equal(t, 1, groupings[1].Count)
 	assert.Equal(t, "admin@other.com", groupings[1].Address)
+	assert.True(t, groupings[1].GroupedByFrom)
 }
 
 func TestTriager_LoadGroupings_Error(t *testing.T) {

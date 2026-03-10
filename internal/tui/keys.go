@@ -12,6 +12,7 @@ type KeyMap struct {
 	Archive key.Binding
 	Toggle  key.Binding
 	Sort    key.Binding
+	Filter  key.Binding
 	Back    key.Binding
 	Quit    key.Binding
 	Confirm key.Binding
@@ -46,6 +47,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("s"),
 			key.WithHelp("s", "sort"),
 		),
+		Filter: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "filter"),
+		),
 		Back: key.NewBinding(
 			key.WithKeys("esc", "backspace"),
 			key.WithHelp("esc", "back"),
@@ -71,14 +76,14 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to show in the short help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Select, k.Archive, k.Toggle, k.Sort, k.Back, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Select, k.Archive, k.Toggle, k.Sort, k.Filter, k.Back, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down},
-		{k.Select, k.Archive, k.Toggle, k.Sort, k.Back},
+		{k.Select, k.Archive, k.Toggle, k.Sort, k.Filter, k.Back},
 		{k.Help, k.Quit},
 	}
 }

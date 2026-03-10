@@ -36,7 +36,7 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 	groupMap := make(map[string]*Grouping)
 
 	handler := func(msg *imap.Message) error {
-		address := t.extractGroupingAddress(msg)
+		address, isGroupedByFrom := t.extractGroupingAddress(msg)
 		if address == "" {
 			return nil
 		}
@@ -46,9 +46,10 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 			g.UIDs = append(g.UIDs, msg.UID)
 		} else {
 			groupMap[address] = &Grouping{
-				Address: address,
-				Count:   1,
-				UIDs:    []uint32{msg.UID},
+				Address:       address,
+				Count:         1,
+				UIDs:          []uint32{msg.UID},
+				GroupedByFrom: isGroupedByFrom,
 			}
 		}
 		return nil
@@ -72,23 +73,24 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 }
 
 // extractGroupingAddress determines the address to use for grouping.
-func (t *triager) extractGroupingAddress(msg *imap.Message) string {
+// Returns the address and whether it was grouped by the FROM field.
+func (t *triager) extractGroupingAddress(msg *imap.Message) (string, bool) {
 	// Check if sender should trigger group-by-from behavior
 	if len(msg.From) > 0 {
 		fromAddr := msg.From[0].String()
 		for _, prefix := range t.groupByFrom {
 			if mailaddr.HasPrefix(fromAddr, prefix) {
-				return fromAddr
+				return fromAddr, true
 			}
 		}
 	}
 
 	// Otherwise, use the To address
 	if len(msg.To) > 0 {
-		return mailaddr.Normalize(msg.To[0].String())
+		return mailaddr.Normalize(msg.To[0].String()), false
 	}
 
-	return ""
+	return "", false
 }
 
 // LoadMessages fetches full message details for a grouping.

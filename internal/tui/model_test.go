@@ -1505,3 +1505,199 @@ func TestModel_Update_DefaultMsgType(t *testing.T) {
 	assert.Equal(t, ViewLoading, m.view)
 	assert.Nil(t, cmd)
 }
+
+func TestModel_HandleGroupingsKeys_Filter_Toggle(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+	model.groupingsCursor = 1
+	model.checkedGroupings = map[int]bool{0: true}
+
+	// Press f to toggle to special filter
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+	m := newModel.(Model)
+	assert.Equal(t, FilterSpecial, m.groupingFilter)
+	assert.Equal(t, 0, m.groupingsCursor)
+	assert.Empty(t, m.checkedGroupings)
+
+	// Press f again to toggle back to all
+	newModel, _ = m.handleGroupingsKeys(msg)
+	m = newModel.(Model)
+	assert.Equal(t, FilterAll, m.groupingFilter)
+	assert.Equal(t, 0, m.groupingsCursor)
+}
+
+func TestModel_FilteredGroupings(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+
+	// FilterAll returns all
+	model.groupingFilter = FilterAll
+	filtered := model.filteredGroupings()
+	assert.Len(t, filtered, 3)
+
+	// FilterSpecial returns only GroupedByFrom
+	model.groupingFilter = FilterSpecial
+	filtered = model.filteredGroupings()
+	assert.Len(t, filtered, 2)
+	assert.Equal(t, "admin@company.com", filtered[0].Address)
+	assert.Equal(t, "hi@startup.io", filtered[1].Address)
+}
+
+func TestModel_FilteredGroupingIndices(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+
+	// FilterAll returns sequential indices
+	model.groupingFilter = FilterAll
+	indices := model.filteredGroupingIndices()
+	assert.Equal(t, []int{0, 1, 2}, indices)
+
+	// FilterSpecial returns only indices of GroupedByFrom
+	model.groupingFilter = FilterSpecial
+	indices = model.filteredGroupingIndices()
+	assert.Equal(t, []int{0, 2}, indices)
+}
+
+func TestModel_HandleGroupingsKeys_NavigationRespectsFilter(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+	model.groupingFilter = FilterSpecial
+	model.groupingsCursor = 0
+
+	// Down should work within filtered bounds (2 items)
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+	m := newModel.(Model)
+	assert.Equal(t, 1, m.groupingsCursor)
+
+	// Down again should NOT go beyond filtered length
+	newModel, _ = m.handleGroupingsKeys(msg)
+	m = newModel.(Model)
+	assert.Equal(t, 1, m.groupingsCursor)
+}
+
+func TestModel_HandleGroupingsKeys_EnterWithFilter(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+	model.groupingFilter = FilterSpecial
+	model.groupingsCursor = 1 // Second filtered item = hi@startup.io (real index 2)
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	newModel, cmd := model.handleGroupingsKeys(msg)
+
+	m := newModel.(Model)
+	assert.Equal(t, ViewLoading, m.view)
+	assert.Equal(t, "hi@startup.io", m.selectedGrouping.Address)
+	assert.NotNil(t, cmd)
+}
+
+func TestModel_HandleGroupingsKeys_ToggleWithFilter(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+	model.groupingFilter = FilterSpecial
+	model.groupingsCursor = 1 // Second filtered item = real index 2
+
+	// Toggle on
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+	m := newModel.(Model)
+	assert.True(t, m.checkedGroupings[2])  // Real index 2
+	assert.False(t, m.checkedGroupings[1]) // Real index 1 not affected
+}
+
+func TestModel_HandleGroupingsKeys_ArchiveWithFilter(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+	model.groupingFilter = FilterSpecial
+	model.groupingsCursor = 1 // Second filtered item = real index 2
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+	m := newModel.(Model)
+	assert.Equal(t, ViewConfirm, m.view)
+	assert.Equal(t, "archive", m.confirmAction)
+	assert.Equal(t, "hi@startup.io", m.selectedGrouping.Address)
+}
+
+func TestModel_View_GroupingsWithFilter(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.width = 80
+	model.height = 24
+	model.groupings = []*triage.Grouping{
+		{Address: "admin@company.com", Count: 42, GroupedByFrom: true},
+		{Address: "user1@example.com", Count: 30},
+		{Address: "hi@startup.io", Count: 15, GroupedByFrom: true},
+	}
+	model.groupingFilter = FilterSpecial
+
+	view := model.View()
+	assert.Contains(t, view, "admin@company.com")
+	assert.Contains(t, view, "hi@startup.io")
+	assert.NotContains(t, view, "user1@example.com")
+	assert.Contains(t, view, "special groupings")
+}
+
+func TestModel_FilterPersistsAfterResult(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewResult
+	model.groupingFilter = FilterSpecial
+	model.result = &triage.TriageResult{ArchivedCount: 5}
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	newModel, _ := model.handleResultKeys(msg)
+	m := newModel.(Model)
+	assert.Equal(t, FilterSpecial, m.groupingFilter)
+}

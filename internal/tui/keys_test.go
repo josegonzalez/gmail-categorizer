@@ -20,6 +20,7 @@ func TestDefaultKeyMap(t *testing.T) {
 		{"Archive", km.Archive},
 		{"Toggle", km.Toggle},
 		{"Sort", km.Sort},
+		{"Filter", km.Filter},
 		{"Back", km.Back},
 		{"Quit", km.Quit},
 		{"Confirm", km.Confirm},
@@ -53,6 +54,8 @@ func TestDefaultKeyMap_SpecificKeys(t *testing.T) {
 
 	assert.Contains(t, km.Sort.Keys(), "s")
 
+	assert.Contains(t, km.Filter.Keys(), "f")
+
 	assert.Contains(t, km.Back.Keys(), "esc")
 	assert.Contains(t, km.Back.Keys(), "backspace")
 
@@ -71,10 +74,10 @@ func TestKeyMap_ShortHelp(t *testing.T) {
 	km := DefaultKeyMap()
 	shortHelp := km.ShortHelp()
 
-	assert.Equal(t, 8, len(shortHelp), "ShortHelp should return 8 bindings")
+	assert.Equal(t, 9, len(shortHelp), "ShortHelp should return 9 bindings")
 
 	// Verify all expected bindings are included
-	expectedBindings := []key.Binding{km.Up, km.Down, km.Select, km.Archive, km.Toggle, km.Sort, km.Back, km.Quit}
+	expectedBindings := []key.Binding{km.Up, km.Down, km.Select, km.Archive, km.Toggle, km.Sort, km.Filter, km.Back, km.Quit}
 	for i, binding := range expectedBindings {
 		assert.Equal(t, binding.Keys(), shortHelp[i].Keys())
 	}
@@ -92,12 +95,13 @@ func TestKeyMap_FullHelp(t *testing.T) {
 	assert.Equal(t, km.Down.Keys(), fullHelp[0][1].Keys())
 
 	// Second group: actions
-	assert.Equal(t, 5, len(fullHelp[1]))
+	assert.Equal(t, 6, len(fullHelp[1]))
 	assert.Equal(t, km.Select.Keys(), fullHelp[1][0].Keys())
 	assert.Equal(t, km.Archive.Keys(), fullHelp[1][1].Keys())
 	assert.Equal(t, km.Toggle.Keys(), fullHelp[1][2].Keys())
 	assert.Equal(t, km.Sort.Keys(), fullHelp[1][3].Keys())
-	assert.Equal(t, km.Back.Keys(), fullHelp[1][4].Keys())
+	assert.Equal(t, km.Filter.Keys(), fullHelp[1][4].Keys())
+	assert.Equal(t, km.Back.Keys(), fullHelp[1][5].Keys())
 
 	// Third group: help and quit
 	assert.Equal(t, 2, len(fullHelp[2]))

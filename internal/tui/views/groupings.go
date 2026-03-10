@@ -10,13 +10,23 @@ import (
 )
 
 // RenderGroupings renders the groupings list view.
-func RenderGroupings(groupings []*triage.Grouping, cursor int, width, height int, checked map[int]bool) string {
+func RenderGroupings(groupings []*triage.Grouping, cursor int, width, height int, checked map[int]bool, filterMode int, specialCount int) string {
 	var b strings.Builder
 
 	b.WriteString(styles.TitleStyle.Render("Email Groupings"))
 	b.WriteString("\n")
 
-	subtitle := fmt.Sprintf("%d groupings in inbox", len(groupings))
+	var subtitle string
+	if filterMode == 1 {
+		// FilterSpecial
+		subtitle = fmt.Sprintf("%d special groupings (grouped by sender) • f show all", len(groupings))
+	} else {
+		// FilterAll
+		subtitle = fmt.Sprintf("%d groupings in inbox", len(groupings))
+		if specialCount > 0 {
+			subtitle += fmt.Sprintf(" (%d special)", specialCount)
+		}
+	}
 	checkedCount := len(checked)
 	if checkedCount > 0 {
 		subtitle += fmt.Sprintf(" • %d selected", checkedCount)
@@ -33,6 +43,9 @@ func RenderGroupings(groupings []*triage.Grouping, cursor int, width, height int
 			checkbox = "[x]"
 		}
 		line := fmt.Sprintf("%s %s  %s", checkbox, styles.CountStyle.Render(fmt.Sprintf("%4d", g.Count)), g.Address)
+		if g.GroupedByFrom {
+			line += "  " + styles.SpecialMarkerStyle.Render("*")
+		}
 
 		if i == cursor {
 			b.WriteString(styles.SelectedStyle.Render(line))
@@ -43,7 +56,7 @@ func RenderGroupings(groupings []*triage.Grouping, cursor int, width, height int
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.HelpStyle.Render("↑/↓ navigate • space toggle • enter view • a archive • q quit"))
+	b.WriteString(styles.HelpStyle.Render("↑/↓ navigate • space toggle • enter view • a archive • f filter • q quit"))
 
 	return b.String()
 }

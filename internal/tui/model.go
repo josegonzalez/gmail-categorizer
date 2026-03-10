@@ -12,6 +12,14 @@ import (
 	"github.com/josegonzalez/gmail-categorizer/internal/tui/views"
 )
 
+// GroupingFilter represents the filter mode for the groupings view.
+type GroupingFilter int
+
+const (
+	FilterAll     GroupingFilter = iota
+	FilterSpecial                // Show only GroupedByFrom groupings
+)
+
 // ViewState represents the current view in the TUI.
 type ViewState int
 
@@ -47,6 +55,7 @@ type Model struct {
 	groupings        []*triage.Grouping
 	groupingsCursor  int
 	checkedGroupings map[int]bool
+	groupingFilter   GroupingFilter
 
 	// Subjects view
 	selectedGrouping *triage.Grouping
@@ -171,6 +180,9 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleGroupingsKeys handles keys in the groupings view.
 func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	filtered := m.filteredGroupings()
+	indices := m.filteredGroupingIndices()
+
 	switch {
 	case msg.String() == "q" || msg.String() == "ctrl+c":
 		m.quitting = true
@@ -182,23 +194,24 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "down" || msg.String() == "j":
-		if m.groupingsCursor < len(m.groupings)-1 {
+		if m.groupingsCursor < len(filtered)-1 {
 			m.groupingsCursor++
 		}
 
 	case msg.String() == " ":
-		if len(m.groupings) > 0 {
-			idx := m.groupingsCursor
-			if m.checkedGroupings[idx] {
-				delete(m.checkedGroupings, idx)
+		if len(filtered) > 0 {
+			realIdx := indices[m.groupingsCursor]
+			if m.checkedGroupings[realIdx] {
+				delete(m.checkedGroupings, realIdx)
 			} else {
-				m.checkedGroupings[idx] = true
+				m.checkedGroupings[realIdx] = true
 			}
 		}
 
 	case msg.String() == "enter":
-		if len(m.groupings) > 0 {
-			m.selectedGrouping = m.groupings[m.groupingsCursor]
+		if len(filtered) > 0 {
+			realIdx := indices[m.groupingsCursor]
+			m.selectedGrouping = m.groupings[realIdx]
 			m.subjectsCursor = 0
 			m.subjectsOffset = 0
 			m.view = ViewLoading
@@ -207,18 +220,28 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case msg.String() == "a":
-		if len(m.groupings) > 0 {
+		if len(filtered) > 0 {
 			if len(m.checkedGroupings) > 0 {
 				// Batch archive
 				m.confirmAction = "batch-archive"
 				m.view = ViewConfirm
 			} else {
 				// Single archive (existing behavior)
-				m.selectedGrouping = m.groupings[m.groupingsCursor]
+				realIdx := indices[m.groupingsCursor]
+				m.selectedGrouping = m.groupings[realIdx]
 				m.confirmAction = "archive"
 				m.view = ViewConfirm
 			}
 		}
+
+	case msg.String() == "f":
+		if m.groupingFilter == FilterAll {
+			m.groupingFilter = FilterSpecial
+		} else {
+			m.groupingFilter = FilterAll
+		}
+		m.groupingsCursor = 0
+		m.checkedGroupings = make(map[int]bool)
 	}
 
 	return m, nil
@@ -357,6 +380,38 @@ func (m Model) doArchive() tea.Msg {
 	return archiveResultMsg{result}
 }
 
+// filteredGroupings returns groupings matching the current filter.
+func (m Model) filteredGroupings() []*triage.Grouping {
+	if m.groupingFilter == FilterAll {
+		return m.groupings
+	}
+	result := make([]*triage.Grouping, 0)
+	for _, g := range m.groupings {
+		if g.GroupedByFrom {
+			result = append(result, g)
+		}
+	}
+	return result
+}
+
+// filteredGroupingIndices returns indices into m.groupings for filtered items.
+func (m Model) filteredGroupingIndices() []int {
+	if m.groupingFilter == FilterAll {
+		indices := make([]int, len(m.groupings))
+		for i := range m.groupings {
+			indices[i] = i
+		}
+		return indices
+	}
+	indices := make([]int, 0)
+	for i, g := range m.groupings {
+		if g.GroupedByFrom {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
 // checkedGroupingsList returns checked groupings in index order.
 func (m Model) checkedGroupingsList() []*triage.Grouping {
 	indices := make([]int, 0, len(m.checkedGroupings))
@@ -416,7 +471,22 @@ func (m Model) View() string {
 		return views.RenderLoading(m.spinner.View(), msg)
 
 	case ViewGroupings:
-		return views.RenderGroupings(m.groupings, m.groupingsCursor, m.width, m.height, m.checkedGroupings)
+		filtered := m.filteredGroupings()
+		indices := m.filteredGroupingIndices()
+		// Remap checked from real indices to filtered indices
+		filteredChecked := make(map[int]bool)
+		for fi, realIdx := range indices {
+			if m.checkedGroupings[realIdx] {
+				filteredChecked[fi] = true
+			}
+		}
+		specialCount := 0
+		for _, g := range m.groupings {
+			if g.GroupedByFrom {
+				specialCount++
+			}
+		}
+		return views.RenderGroupings(filtered, m.groupingsCursor, m.width, m.height, filteredChecked, int(m.groupingFilter), specialCount)
 
 	case ViewSubjects:
 		if m.selectedGrouping == nil {
