@@ -26,6 +26,8 @@ func TestNewModel(t *testing.T) {
 	assert.False(t, model.quitting)
 	assert.Equal(t, 0, model.groupingsCursor)
 	assert.Nil(t, model.groupings)
+	assert.NotNil(t, model.checkedGroupings)
+	assert.Empty(t, model.checkedGroupings)
 }
 
 func TestModel_Init(t *testing.T) {
@@ -117,6 +119,22 @@ func TestModel_Update_GroupingsLoadedMsg_Empty(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
+func TestModel_Update_GroupingsLoadedMsg_ClearsChecked(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.checkedGroupings = map[int]bool{0: true, 1: true}
+
+	groupings := []*triage.Grouping{
+		{Address: "test@example.com", Count: 5},
+	}
+	msg := groupingsLoadedMsg{groupings: groupings}
+	newModel, _ := model.Update(msg)
+
+	m := newModel.(Model)
+	assert.Empty(t, m.checkedGroupings)
+}
+
 func TestModel_Update_MessagesLoadedMsg(t *testing.T) {
 	ctx := context.Background()
 	triager := &mockTriager{}
@@ -143,6 +161,24 @@ func TestModel_Update_ArchiveResultMsg(t *testing.T) {
 	m := newModel.(Model)
 	assert.Equal(t, ViewResult, m.view)
 	assert.Equal(t, result, m.result)
+	assert.Nil(t, cmd)
+}
+
+func TestModel_Update_BatchArchiveResultMsg(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+
+	results := []batchArchiveEntry{
+		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5, DestinationFolder: "automated/a"}},
+		{Address: "b@test.com", Result: &triage.TriageResult{ArchivedCount: 3, DestinationFolder: "automated/b"}},
+	}
+	msg := batchArchiveResultMsg{results: results}
+	newModel, cmd := model.Update(msg)
+
+	m := newModel.(Model)
+	assert.Equal(t, ViewResult, m.view)
+	assert.Equal(t, results, m.archiveResults)
 	assert.Nil(t, cmd)
 }
 
@@ -262,6 +298,67 @@ func TestModel_HandleGroupingsKeys_Archive(t *testing.T) {
 	m := newModel.(Model)
 	assert.Equal(t, ViewConfirm, m.view)
 	assert.Equal(t, model.groupings[0], m.selectedGrouping)
+	assert.Equal(t, "archive", m.confirmAction)
+}
+
+func TestModel_HandleGroupingsKeys_Toggle(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 1},
+		{Address: "b@test.com", Count: 2},
+	}
+	model.groupingsCursor = 0
+
+	// Toggle on
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+	m := newModel.(Model)
+	assert.True(t, m.checkedGroupings[0])
+	assert.Equal(t, 0, m.groupingsCursor) // Cursor stays
+
+	// Toggle off
+	newModel, _ = m.handleGroupingsKeys(msg)
+	m = newModel.(Model)
+	assert.False(t, m.checkedGroupings[0])
+	assert.Equal(t, 0, m.groupingsCursor)
+}
+
+func TestModel_HandleGroupingsKeys_Toggle_EmptyGroupings(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+	m := newModel.(Model)
+	assert.Empty(t, m.checkedGroupings)
+}
+
+func TestModel_HandleGroupingsKeys_BatchArchive(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+		{Address: "b@test.com", Count: 3},
+		{Address: "c@test.com", Count: 2},
+	}
+	model.checkedGroupings = map[int]bool{0: true, 2: true}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}}
+	newModel, _ := model.handleGroupingsKeys(msg)
+
+	m := newModel.(Model)
+	assert.Equal(t, ViewConfirm, m.view)
+	assert.Equal(t, "batch-archive", m.confirmAction)
+	// Should NOT set selectedGrouping for batch
+	assert.Nil(t, m.selectedGrouping)
 }
 
 func TestModel_HandleSubjectsKeys_Navigation(t *testing.T) {
@@ -311,6 +408,7 @@ func TestModel_HandleConfirmKeys_Yes(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{Address: "test@example.com"}
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}}
@@ -322,12 +420,48 @@ func TestModel_HandleConfirmKeys_Yes(t *testing.T) {
 	assert.NotNil(t, cmd)
 }
 
+func TestModel_HandleConfirmKeys_Yes_BatchArchive(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewConfirm
+	model.confirmAction = "batch-archive"
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+		{Address: "b@test.com", Count: 3},
+	}
+	model.checkedGroupings = map[int]bool{0: true, 1: true}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}}
+	newModel, cmd := model.handleConfirmKeys(msg)
+
+	m := newModel.(Model)
+	assert.Equal(t, ViewLoading, m.view)
+	assert.Equal(t, "batch-archiving", m.loadingAction)
+	assert.NotNil(t, cmd)
+}
+
 func TestModel_HandleConfirmKeys_No(t *testing.T) {
 	ctx := context.Background()
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{Address: "test@example.com"}
+
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
+	newModel, _ := model.handleConfirmKeys(msg)
+
+	m := newModel.(Model)
+	assert.Equal(t, ViewGroupings, m.view)
+}
+
+func TestModel_HandleConfirmKeys_No_BatchArchive(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewConfirm
+	model.confirmAction = "batch-archive"
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
 	newModel, _ := model.handleConfirmKeys(msg)
@@ -341,6 +475,7 @@ func TestModel_HandleConfirmKeys_No_WithMessages(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{
 		Address:  "test@example.com",
 		Messages: []*imap.Message{{Subject: "test"}},
@@ -368,6 +503,28 @@ func TestModel_HandleResultKeys_Continue(t *testing.T) {
 	assert.Equal(t, ViewLoading, m.view)
 	assert.Nil(t, m.selectedGrouping)
 	assert.Nil(t, m.result)
+	assert.Nil(t, m.archiveResults)
+	assert.Empty(t, m.checkedGroupings)
+	assert.NotNil(t, cmd)
+}
+
+func TestModel_HandleResultKeys_Continue_ClearsBatchState(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewResult
+	model.archiveResults = []batchArchiveEntry{
+		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5}},
+	}
+	model.checkedGroupings = map[int]bool{0: true}
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	newModel, cmd := model.handleResultKeys(msg)
+
+	m := newModel.(Model)
+	assert.Equal(t, ViewLoading, m.view)
+	assert.Nil(t, m.archiveResults)
+	assert.Empty(t, m.checkedGroupings)
 	assert.NotNil(t, cmd)
 }
 
@@ -424,6 +581,23 @@ func TestModel_View_Loading_WithSelectedGrouping(t *testing.T) {
 	assert.Contains(t, view, "test@example.com")
 }
 
+func TestModel_View_Loading_BatchArchiving(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewLoading
+	model.loadingAction = "batch-archiving"
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+		{Address: "b@test.com", Count: 3},
+		{Address: "c@test.com", Count: 2},
+	}
+	model.checkedGroupings = map[int]bool{0: true, 2: true}
+
+	view := model.View()
+	assert.Contains(t, view, "Archiving 2 groupings")
+}
+
 func TestModel_View_Groupings(t *testing.T) {
 	ctx := context.Background()
 	triager := &mockTriager{}
@@ -474,6 +648,7 @@ func TestModel_View_Confirm(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{
 		Address: "test@example.com",
 		Count:   5,
@@ -482,6 +657,24 @@ func TestModel_View_Confirm(t *testing.T) {
 	view := model.View()
 	assert.Contains(t, view, "test@example.com")
 	assert.Contains(t, view, "5")
+}
+
+func TestModel_View_Confirm_Batch(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewConfirm
+	model.confirmAction = "batch-archive"
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+		{Address: "b@test.com", Count: 3},
+	}
+	model.checkedGroupings = map[int]bool{0: true, 1: true}
+
+	view := model.View()
+	assert.Contains(t, view, "Batch Archive")
+	assert.Contains(t, view, "a@test.com")
+	assert.Contains(t, view, "b@test.com")
 }
 
 func TestModel_View_Result(t *testing.T) {
@@ -497,6 +690,38 @@ func TestModel_View_Result(t *testing.T) {
 	view := model.View()
 	assert.Contains(t, view, "10")
 	assert.Contains(t, view, "automated/test")
+}
+
+func TestModel_View_Result_Batch(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewResult
+	model.archiveResults = []batchArchiveEntry{
+		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5, DestinationFolder: "automated/a"}},
+		{Address: "b@test.com", Result: &triage.TriageResult{ArchivedCount: 3, DestinationFolder: "automated/b"}},
+	}
+
+	view := model.View()
+	assert.Contains(t, view, "Batch Archive Complete")
+	assert.Contains(t, view, "automated/a")
+	assert.Contains(t, view, "automated/b")
+}
+
+func TestModel_View_Result_Batch_WithFailure(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.view = ViewResult
+	model.archiveResults = []batchArchiveEntry{
+		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5, DestinationFolder: "automated/a"}},
+		{Address: "b@test.com", Err: errors.New("timeout")},
+	}
+
+	view := model.View()
+	assert.Contains(t, view, "Batch Archive Complete")
+	assert.Contains(t, view, "automated/a")
+	assert.Contains(t, view, "timeout")
 }
 
 func TestModel_View_Error(t *testing.T) {
@@ -664,6 +889,117 @@ func TestModel_DoArchive_Error(t *testing.T) {
 	errMsgResult, ok := msg.(errMsg)
 	require.True(t, ok)
 	assert.Contains(t, errMsgResult.err.Error(), "archive failed")
+}
+
+func TestModel_CheckedGroupingsList(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 1},
+		{Address: "b@test.com", Count: 2},
+		{Address: "c@test.com", Count: 3},
+	}
+	model.checkedGroupings = map[int]bool{2: true, 0: true}
+
+	result := model.checkedGroupingsList()
+
+	require.Len(t, result, 2)
+	// Should be in index order
+	assert.Equal(t, "a@test.com", result[0].Address)
+	assert.Equal(t, "c@test.com", result[1].Address)
+}
+
+func TestModel_CheckedGroupingsList_Empty(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 1},
+	}
+
+	result := model.checkedGroupingsList()
+	assert.Empty(t, result)
+}
+
+func TestModel_DoBatchArchive_Success(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{
+		ArchiveFunc: func(ctx context.Context, g *triage.Grouping) (*triage.TriageResult, error) {
+			return &triage.TriageResult{
+				ArchivedCount:     g.Count,
+				DestinationFolder: g.DestinationFolder(),
+			}, nil
+		},
+	}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+		{Address: "b@test.com", Count: 3},
+	}
+	model.checkedGroupings = map[int]bool{0: true, 1: true}
+
+	msg := model.doBatchArchive()
+
+	batchMsg, ok := msg.(batchArchiveResultMsg)
+	require.True(t, ok)
+	require.Len(t, batchMsg.results, 2)
+	assert.Equal(t, "a@test.com", batchMsg.results[0].Address)
+	assert.Equal(t, 5, batchMsg.results[0].Result.ArchivedCount)
+	assert.Nil(t, batchMsg.results[0].Err)
+	assert.Equal(t, "b@test.com", batchMsg.results[1].Address)
+	assert.Equal(t, 3, batchMsg.results[1].Result.ArchivedCount)
+	assert.Nil(t, batchMsg.results[1].Err)
+}
+
+func TestModel_DoBatchArchive_PartialFailure(t *testing.T) {
+	ctx := context.Background()
+	callCount := 0
+	triager := &mockTriager{
+		ArchiveFunc: func(ctx context.Context, g *triage.Grouping) (*triage.TriageResult, error) {
+			callCount++
+			if callCount == 2 {
+				return nil, errors.New("connection timeout")
+			}
+			return &triage.TriageResult{
+				ArchivedCount:     g.Count,
+				DestinationFolder: g.DestinationFolder(),
+			}, nil
+		},
+	}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+		{Address: "b@test.com", Count: 3},
+		{Address: "c@test.com", Count: 2},
+	}
+	model.checkedGroupings = map[int]bool{0: true, 1: true, 2: true}
+
+	msg := model.doBatchArchive()
+
+	batchMsg, ok := msg.(batchArchiveResultMsg)
+	require.True(t, ok)
+	require.Len(t, batchMsg.results, 3)
+
+	assert.Nil(t, batchMsg.results[0].Err)
+	assert.NotNil(t, batchMsg.results[1].Err)
+	assert.Contains(t, batchMsg.results[1].Err.Error(), "connection timeout")
+	assert.Nil(t, batchMsg.results[2].Err)
+}
+
+func TestModel_DoBatchArchive_NoneChecked(t *testing.T) {
+	ctx := context.Background()
+	triager := &mockTriager{}
+	model := NewModel(ctx, triager)
+	model.groupings = []*triage.Grouping{
+		{Address: "a@test.com", Count: 5},
+	}
+
+	msg := model.doBatchArchive()
+
+	errMsgResult, ok := msg.(errMsg)
+	require.True(t, ok)
+	assert.Contains(t, errMsgResult.err.Error(), "no groupings selected")
 }
 
 func TestModel_HandleGroupingsKeys_BoundaryNavigation(t *testing.T) {
@@ -914,6 +1250,7 @@ func TestModel_HandleConfirmKeys_Enter(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{Address: "test@example.com"}
 
 	msg := tea.KeyMsg{Type: tea.KeyEnter}
@@ -930,6 +1267,7 @@ func TestModel_HandleConfirmKeys_Esc(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{Address: "test@example.com"}
 
 	msg := tea.KeyMsg{Type: tea.KeyEsc}
@@ -1030,6 +1368,7 @@ func TestModel_Update_ConfirmKeyPress(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
+	model.confirmAction = "archive"
 	model.selectedGrouping = &triage.Grouping{Address: "test@example.com"}
 
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}

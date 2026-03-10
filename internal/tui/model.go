@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -23,6 +24,13 @@ const (
 	ViewError
 )
 
+// batchArchiveEntry holds the result of archiving a single grouping in a batch.
+type batchArchiveEntry struct {
+	Address string
+	Result  *triage.TriageResult
+	Err     error
+}
+
 // Model represents the main TUI application state.
 type Model struct {
 	triager  triage.Triager
@@ -36,8 +44,9 @@ type Model struct {
 	quitting bool
 
 	// Groupings view
-	groupings       []*triage.Grouping
-	groupingsCursor int
+	groupings        []*triage.Grouping
+	groupingsCursor  int
+	checkedGroupings map[int]bool
 
 	// Subjects view
 	selectedGrouping *triage.Grouping
@@ -52,7 +61,8 @@ type Model struct {
 	loadingAction string
 
 	// Result view
-	result *triage.TriageResult
+	result         *triage.TriageResult
+	archiveResults []batchArchiveEntry
 }
 
 // NewModel creates a new TUI model.
@@ -62,11 +72,12 @@ func NewModel(ctx context.Context, triager triage.Triager) Model {
 	s.Style = SpinnerStyle
 
 	return Model{
-		triager: triager,
-		ctx:     ctx,
-		keys:    DefaultKeyMap(),
-		view:    ViewLoading,
-		spinner: s,
+		triager:          triager,
+		ctx:              ctx,
+		keys:             DefaultKeyMap(),
+		view:             ViewLoading,
+		spinner:          s,
+		checkedGroupings: make(map[int]bool),
 	}
 }
 
@@ -99,6 +110,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case groupingsLoadedMsg:
 		m.groupings = msg.groupings
+		m.checkedGroupings = make(map[int]bool)
 		m.view = ViewGroupings
 		if len(m.groupings) == 0 {
 			m.err = fmt.Errorf("no messages in inbox")
@@ -115,6 +127,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case archiveResultMsg:
 		m.result = msg.result
+		m.view = ViewResult
+		return m, nil
+
+	case batchArchiveResultMsg:
+		m.archiveResults = msg.results
 		m.view = ViewResult
 		return m, nil
 
@@ -169,6 +186,16 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.groupingsCursor++
 		}
 
+	case msg.String() == " ":
+		if len(m.groupings) > 0 {
+			idx := m.groupingsCursor
+			if m.checkedGroupings[idx] {
+				delete(m.checkedGroupings, idx)
+			} else {
+				m.checkedGroupings[idx] = true
+			}
+		}
+
 	case msg.String() == "enter":
 		if len(m.groupings) > 0 {
 			m.selectedGrouping = m.groupings[m.groupingsCursor]
@@ -181,9 +208,16 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "a":
 		if len(m.groupings) > 0 {
-			m.selectedGrouping = m.groupings[m.groupingsCursor]
-			m.confirmAction = "archive"
-			m.view = ViewConfirm
+			if len(m.checkedGroupings) > 0 {
+				// Batch archive
+				m.confirmAction = "batch-archive"
+				m.view = ViewConfirm
+			} else {
+				// Single archive (existing behavior)
+				m.selectedGrouping = m.groupings[m.groupingsCursor]
+				m.confirmAction = "archive"
+				m.view = ViewConfirm
+			}
 		}
 	}
 
@@ -232,12 +266,17 @@ func (m Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case msg.String() == "y" || msg.String() == "enter":
 		m.view = ViewLoading
+		if m.confirmAction == "batch-archive" {
+			m.loadingAction = "batch-archiving"
+			return m, tea.Batch(m.spinner.Tick, m.doBatchArchive)
+		}
 		m.loadingAction = "archiving"
 		return m, tea.Batch(m.spinner.Tick, m.doArchive)
 
 	case msg.String() == "n" || msg.String() == "esc":
-		// Go back to previous view
-		if m.selectedGrouping != nil && len(m.selectedGrouping.Messages) > 0 {
+		if m.confirmAction == "batch-archive" {
+			m.view = ViewGroupings
+		} else if m.selectedGrouping != nil && len(m.selectedGrouping.Messages) > 0 {
 			m.view = ViewSubjects
 		} else {
 			m.view = ViewGroupings
@@ -258,6 +297,8 @@ func (m Model) handleResultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Reset and reload groupings
 		m.selectedGrouping = nil
 		m.result = nil
+		m.archiveResults = nil
+		m.checkedGroupings = make(map[int]bool)
 		m.view = ViewLoading
 		m.loadingAction = ""
 		return m, tea.Batch(m.spinner.Tick, m.loadGroupings)
@@ -281,6 +322,7 @@ func (m Model) handleErrorKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 type groupingsLoadedMsg struct{ groupings []*triage.Grouping }
 type messagesLoadedMsg struct{}
 type archiveResultMsg struct{ result *triage.TriageResult }
+type batchArchiveResultMsg struct{ results []batchArchiveEntry }
 type errMsg struct{ err error }
 
 // loadGroupings loads email groupings asynchronously.
@@ -315,6 +357,42 @@ func (m Model) doArchive() tea.Msg {
 	return archiveResultMsg{result}
 }
 
+// checkedGroupingsList returns checked groupings in index order.
+func (m Model) checkedGroupingsList() []*triage.Grouping {
+	indices := make([]int, 0, len(m.checkedGroupings))
+	for idx := range m.checkedGroupings {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	result := make([]*triage.Grouping, 0, len(indices))
+	for _, idx := range indices {
+		if idx < len(m.groupings) {
+			result = append(result, m.groupings[idx])
+		}
+	}
+	return result
+}
+
+// doBatchArchive archives each checked grouping sequentially.
+func (m Model) doBatchArchive() tea.Msg {
+	groupings := m.checkedGroupingsList()
+	if len(groupings) == 0 {
+		return errMsg{fmt.Errorf("no groupings selected")}
+	}
+
+	results := make([]batchArchiveEntry, 0, len(groupings))
+	for _, g := range groupings {
+		result, err := m.triager.Archive(m.ctx, g)
+		results = append(results, batchArchiveEntry{
+			Address: g.Address,
+			Result:  result,
+			Err:     err,
+		})
+	}
+	return batchArchiveResultMsg{results}
+}
+
 // View renders the current view.
 func (m Model) View() string {
 	if m.quitting {
@@ -324,7 +402,10 @@ func (m Model) View() string {
 	switch m.view {
 	case ViewLoading:
 		msg := "Loading..."
-		if m.selectedGrouping != nil {
+		if m.loadingAction == "batch-archiving" {
+			checkedGroupings := m.checkedGroupingsList()
+			msg = fmt.Sprintf("Archiving %d groupings...", len(checkedGroupings))
+		} else if m.selectedGrouping != nil {
 			switch m.loadingAction {
 			case "archiving":
 				msg = fmt.Sprintf("Archiving messages for %s...", m.selectedGrouping.Address)
@@ -335,7 +416,7 @@ func (m Model) View() string {
 		return views.RenderLoading(m.spinner.View(), msg)
 
 	case ViewGroupings:
-		return views.RenderGroupings(m.groupings, m.groupingsCursor, m.width, m.height)
+		return views.RenderGroupings(m.groupings, m.groupingsCursor, m.width, m.height, m.checkedGroupings)
 
 	case ViewSubjects:
 		if m.selectedGrouping == nil {
@@ -344,9 +425,26 @@ func (m Model) View() string {
 		return views.RenderSubjects(m.selectedGrouping.Address, m.selectedGrouping.Messages, m.subjectsCursor, m.width, m.height, sortModeLabel(m.subjectsSortMode))
 
 	case ViewConfirm:
+		if m.confirmAction == "batch-archive" {
+			return views.RenderBatchConfirm(m.checkedGroupingsList())
+		}
 		return views.RenderConfirm(m.selectedGrouping)
 
 	case ViewResult:
+		if m.archiveResults != nil {
+			entries := make([]views.BatchResultEntry, len(m.archiveResults))
+			for i, r := range m.archiveResults {
+				entries[i] = views.BatchResultEntry{
+					Address: r.Address,
+					Err:     r.Err,
+				}
+				if r.Result != nil {
+					entries[i].ArchivedCount = r.Result.ArchivedCount
+					entries[i].DestinationFolder = r.Result.DestinationFolder
+				}
+			}
+			return views.RenderBatchResult(entries)
+		}
 		return views.RenderResult(m.result)
 
 	case ViewError:

@@ -48,6 +48,88 @@ func TestRenderConfirm_SingleMessage(t *testing.T) {
 	assert.Contains(t, result, "single@example.com")
 }
 
+func TestRenderBatchConfirm(t *testing.T) {
+	groupings := []*triage.Grouping{
+		{Address: "newsletter@example.com", Count: 15},
+		{Address: "alerts@bank.com", Count: 8},
+		{Address: "digest@medium.com", Count: 3},
+	}
+
+	result := RenderBatchConfirm(groupings)
+
+	assert.Contains(t, result, "Confirm Batch Archive")
+	assert.Contains(t, result, "26 messages from 3 groupings")
+	assert.Contains(t, result, "newsletter@example.com")
+	assert.Contains(t, result, "alerts@bank.com")
+	assert.Contains(t, result, "digest@medium.com")
+	assert.Contains(t, result, "automated/newsletter")
+	assert.Contains(t, result, "automated/alerts")
+	assert.Contains(t, result, "automated/digest")
+	assert.Contains(t, result, "Continue?")
+	assert.Contains(t, result, "y/n")
+}
+
+func TestRenderBatchConfirm_SingleGrouping(t *testing.T) {
+	groupings := []*triage.Grouping{
+		{Address: "test@example.com", Count: 5},
+	}
+
+	result := RenderBatchConfirm(groupings)
+
+	assert.Contains(t, result, "5 messages from 1 groupings")
+	assert.Contains(t, result, "test@example.com")
+}
+
+func TestRenderBatchResult_AllSucceeded(t *testing.T) {
+	results := []BatchResultEntry{
+		{Address: "newsletter@example.com", ArchivedCount: 15, DestinationFolder: "automated/newsletter"},
+		{Address: "alerts@bank.com", ArchivedCount: 8, DestinationFolder: "automated/alerts"},
+		{Address: "digest@medium.com", ArchivedCount: 3, DestinationFolder: "automated/digest"},
+	}
+
+	output := RenderBatchResult(results)
+
+	assert.Contains(t, output, "Batch Archive Complete")
+	assert.Contains(t, output, "15 messages")
+	assert.Contains(t, output, "automated/newsletter")
+	assert.Contains(t, output, "8 messages")
+	assert.Contains(t, output, "automated/alerts")
+	assert.Contains(t, output, "3 messages")
+	assert.Contains(t, output, "automated/digest")
+	assert.Contains(t, output, "26 messages archived across 3 groupings")
+	assert.Contains(t, output, "enter")
+	assert.Contains(t, output, "continue")
+}
+
+func TestRenderBatchResult_PartialFailure(t *testing.T) {
+	results := []BatchResultEntry{
+		{Address: "newsletter@example.com", ArchivedCount: 15, DestinationFolder: "automated/newsletter"},
+		{Address: "alerts@bank.com", Err: errors.New("connection timeout")},
+		{Address: "digest@medium.com", ArchivedCount: 3, DestinationFolder: "automated/digest"},
+	}
+
+	output := RenderBatchResult(results)
+
+	assert.Contains(t, output, "Batch Archive Complete")
+	assert.Contains(t, output, "15 messages")
+	assert.Contains(t, output, "✗ alerts@bank.com: connection timeout")
+	assert.Contains(t, output, "3 messages")
+	assert.Contains(t, output, "18 messages archived (2 succeeded, 1 failed)")
+}
+
+func TestRenderBatchResult_AllFailed(t *testing.T) {
+	results := []BatchResultEntry{
+		{Address: "a@example.com", Err: errors.New("error 1")},
+		{Address: "b@example.com", Err: errors.New("error 2")},
+	}
+
+	output := RenderBatchResult(results)
+
+	assert.Contains(t, output, "✗ a@example.com: error 1")
+	assert.Contains(t, output, "✗ b@example.com: error 2")
+	assert.Contains(t, output, "0 messages archived (0 succeeded, 2 failed)")
+}
+
 func TestRenderResult(t *testing.T) {
 	result := &triage.TriageResult{
 		ArchivedCount:     25,
