@@ -37,7 +37,7 @@ jobs:
           path: coverage.out
 
       - name: Attest coverage report
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: coverage.out
 
@@ -79,6 +79,6 @@ jobs:
           path: gmail-categorizer*
 
       - name: Attest binary
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: gmail-categorizer*
