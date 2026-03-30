@@ -22,9 +22,9 @@ func TestNewTriager(t *testing.T) {
 
 func TestTriager_LoadGroupings_GroupByTo(t *testing.T) {
 	messages := []*imap.Message{
-		{UID: 1, To: []imap.Address{{Mailbox: "user1", Host: "example.com"}}},
-		{UID: 2, To: []imap.Address{{Mailbox: "user1", Host: "example.com"}}},
-		{UID: 3, To: []imap.Address{{Mailbox: "user2", Host: "example.com"}}},
+		{UID: 1, Subject: "Hello", To: []imap.Address{{Mailbox: "user1", Host: "example.com"}}},
+		{UID: 2, Subject: "World", To: []imap.Address{{Mailbox: "user1", Host: "example.com"}}},
+		{UID: 3, Subject: "Single Email", To: []imap.Address{{Mailbox: "user2", Host: "example.com"}}},
 	}
 
 	client := &mockClient{
@@ -48,9 +48,37 @@ func TestTriager_LoadGroupings_GroupByTo(t *testing.T) {
 	assert.Equal(t, 2, groupings[0].Count)
 	assert.Equal(t, "user1@example.com", groupings[0].Address)
 	assert.False(t, groupings[0].GroupedByFrom)
+	assert.Equal(t, "", groupings[0].Subject)
 	assert.Equal(t, 1, groupings[1].Count)
 	assert.Equal(t, "user2@example.com", groupings[1].Address)
 	assert.False(t, groupings[1].GroupedByFrom)
+	assert.Equal(t, "Single Email", groupings[1].Subject)
+}
+
+func TestTriager_LoadGroupings_SubjectClearedOnMultiple(t *testing.T) {
+	messages := []*imap.Message{
+		{UID: 1, Subject: "First", To: []imap.Address{{Mailbox: "user", Host: "example.com"}}},
+		{UID: 2, Subject: "Second", To: []imap.Address{{Mailbox: "user", Host: "example.com"}}},
+	}
+
+	client := &mockClient{
+		FetchMessagesFunc: func(ctx context.Context, handler imap.MessageHandler, progress imap.ProgressCallback) error {
+			for _, msg := range messages {
+				if err := handler(msg); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+
+	triager := NewTriager(client, []string{})
+	groupings, err := triager.LoadGroupings(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, 1, len(groupings))
+	assert.Equal(t, 2, groupings[0].Count)
+	assert.Equal(t, "", groupings[0].Subject)
 }
 
 func TestTriager_LoadGroupings_EmptyInbox(t *testing.T) {

@@ -61,12 +61,14 @@ func TestGrouping_Fields(t *testing.T) {
 	g := &Grouping{
 		Address:  "test@example.com",
 		Count:    5,
+		Subject:  "",
 		UIDs:     []uint32{1, 2, 3, 4, 5},
 		Messages: nil,
 	}
 
 	assert.Equal(t, "test@example.com", g.Address)
 	assert.Equal(t, 5, g.Count)
+	assert.Equal(t, "", g.Subject)
 	assert.Equal(t, 5, len(g.UIDs))
 	assert.Nil(t, g.Messages)
 }

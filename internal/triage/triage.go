@@ -44,10 +44,12 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 		if g, exists := groupMap[address]; exists {
 			g.Count++
 			g.UIDs = append(g.UIDs, msg.UID)
+			g.Subject = ""
 		} else {
 			groupMap[address] = &Grouping{
 				Address:       address,
 				Count:         1,
+				Subject:       msg.Subject,
 				UIDs:          []uint32{msg.UID},
 				GroupedByFrom: isGroupedByFrom,
 			}

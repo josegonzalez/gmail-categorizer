@@ -71,4 +71,7 @@ var (
 	SpecialMarkerStyle = lipgloss.NewStyle().
 				Foreground(WarningColor).
 				Bold(true)
+
+	SubjectStyle = lipgloss.NewStyle().
+			Foreground(MutedColor)
 )

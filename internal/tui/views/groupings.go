@@ -36,15 +36,48 @@ func RenderGroupings(groupings []*triage.Grouping, cursor int, width, height int
 
 	visible := CalculateVisibleRange(len(groupings), cursor, height, 8)
 
+	// Calculate max address width and whether any single-email subjects exist
+	maxAddrWidth := 0
+	hasSubjects := false
+	for i := visible.Start; i < visible.End; i++ {
+		if len(groupings[i].Address) > maxAddrWidth {
+			maxAddrWidth = len(groupings[i].Address)
+		}
+		if groupings[i].Count == 1 && groupings[i].Subject != "" {
+			hasSubjects = true
+		}
+	}
+
 	for i := visible.Start; i < visible.End; i++ {
 		g := groupings[i]
 		checkbox := "[ ]"
 		if checked[i] {
 			checkbox = "[x]"
 		}
-		line := fmt.Sprintf("%s %s  %s", checkbox, styles.CountStyle.Render(fmt.Sprintf("%4d", g.Count)), g.Address)
+
+		addr := g.Address
+		if hasSubjects {
+			addr = fmt.Sprintf("%-*s", maxAddrWidth, g.Address)
+		}
+
+		line := fmt.Sprintf("%s %s  %s", checkbox, styles.CountStyle.Render(fmt.Sprintf("%4d", g.Count)), addr)
+
 		if g.GroupedByFrom {
 			line += "  " + styles.SpecialMarkerStyle.Render("*")
+		}
+
+		if g.Count == 1 && g.Subject != "" {
+			// Fixed overhead: checkbox(3) + space(1) + count(4) + spacing(2) + addr + spacing(2) + marker(~3)
+			overhead := 12 + maxAddrWidth + 4
+			maxSubjectWidth := width - overhead
+			if maxSubjectWidth < 10 {
+				maxSubjectWidth = 10
+			}
+			subject := g.Subject
+			if len(subject) > maxSubjectWidth {
+				subject = subject[:maxSubjectWidth-3] + "..."
+			}
+			line += "  " + styles.SubjectStyle.Render(subject)
 		}
 
 		if i == cursor {

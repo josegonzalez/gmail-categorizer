@@ -1,6 +1,7 @@
 package views
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -159,6 +160,45 @@ func TestRenderGroupings_FilterAll_NoSpecials(t *testing.T) {
 
 	assert.Contains(t, result, "1 groupings in inbox")
 	assert.NotContains(t, result, "special")
+}
+
+func TestRenderGroupings_WithSubject(t *testing.T) {
+	groupings := []*triage.Grouping{
+		{Address: "user1@example.com", Count: 50},
+		{Address: "user2@example.com", Count: 1, Subject: "Weekly Newsletter"},
+	}
+
+	result := RenderGroupings(groupings, 0, 80, 24, nil, 0, 0)
+
+	assert.Contains(t, result, "Weekly Newsletter")
+	assert.Contains(t, result, "user1@example.com")
+	assert.Contains(t, result, "user2@example.com")
+}
+
+func TestRenderGroupings_SubjectTruncation(t *testing.T) {
+	longSubject := strings.Repeat("a", 200)
+	groupings := []*triage.Grouping{
+		{Address: "user1@example.com", Count: 1, Subject: longSubject},
+	}
+
+	result := RenderGroupings(groupings, 0, 80, 24, nil, 0, 0)
+
+	assert.Contains(t, result, "...")
+	assert.NotContains(t, result, longSubject)
+}
+
+func TestRenderGroupings_NoSubjectPadding_WhenNoSingleEmails(t *testing.T) {
+	groupings := []*triage.Grouping{
+		{Address: "user1@example.com", Count: 50},
+		{Address: "user2@example.com", Count: 30},
+	}
+
+	result := RenderGroupings(groupings, 0, 80, 24, nil, 0, 0)
+
+	assert.Contains(t, result, "user1@example.com")
+	assert.Contains(t, result, "user2@example.com")
+	// No subject text should appear
+	assert.NotContains(t, result, "...")
 }
 
 func TestRenderGroupings_FilterSpecial(t *testing.T) {
