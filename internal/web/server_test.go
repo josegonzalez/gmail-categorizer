@@ -434,3 +434,36 @@ func TestPagesHaveNoInlineScriptsOrExternalResources(t *testing.T) {
 		assert.NotContains(t, body, " onclick=", target)
 	}
 }
+
+func TestRequestsAreLogged(t *testing.T) {
+	env := defaultEnv(t)
+	var buf strings.Builder
+	env.server.opts.Logger = log.New(&buf, "", 0)
+	env.handler = env.server.Handler()
+
+	env.get(t, "/?filter=by-sender")
+	env.get(t, "/groupings/nobody@example.com")
+	env.post(t, "/archive", url.Values{"address": {"receipts@example.com"}})
+
+	req := httptest.NewRequest(http.MethodPost, "/archive", strings.NewReader("address=notifications%40example.com"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	env.do(t, req)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	require.Len(t, lines, 4, buf.String())
+	assert.Regexp(t, `^GET /\?filter=by-sender 200 \d+B \S+$`, lines[0])
+	assert.Regexp(t, `^GET /groupings/nobody@example.com 404 \d+B \S+$`, lines[1])
+	assert.Regexp(t, `^POST /archive 303 \d+B \S+$`, lines[2])
+	assert.Regexp(t, `^POST /archive 403 \d+B \S+$`, lines[3], "rejected cross-origin requests are logged")
+	assert.NotContains(t, buf.String(), "address=", "form bodies are not logged")
+}
+
+func TestStatusRecorder_DefaultsToOK(t *testing.T) {
+	rec := &statusRecorder{ResponseWriter: httptest.NewRecorder()}
+	_, err := rec.Write([]byte("hi"))
+	require.NoError(t, err)
+	rec.WriteHeader(http.StatusTeapot) // ignored after the first write
+	assert.Equal(t, http.StatusOK, rec.status)
+	assert.Equal(t, 2, rec.bytes)
+}

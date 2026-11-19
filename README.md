@@ -120,6 +120,8 @@ Keyboard shortcuts: `j`/`k` move (next and previous on a message), `x` selects, 
 
 The inbox is loaded once at startup. Archiving removes groupings from the page without fetching the inbox again; use Refresh to pick up new mail. Messages are fetched without marking them as read, HTML messages are shown in a sandboxed frame, and remote images are blocked.
 
+Each request is logged to stderr with its method, path, status, response size and duration, for example `2026/11/19 09:42:01 GET /groupings/notifications@example.com 200 8312B 1.204ms`. Form contents are not logged.
+
 The web UI has no authentication and listens on `127.0.0.1` by default. Listening on any other address prints a warning, because anyone who can reach the port can read and archive your mail.
 
 ### Mailboxes Command

@@ -46,7 +46,8 @@ type Options struct {
 	Username string
 	// Now returns the current time, used to format dates. Defaults to time.Now.
 	Now func() time.Time
-	// Logger receives request errors. Defaults to the standard logger.
+	// Logger receives one line per request and any request errors. Defaults
+	// to the standard logger, which writes to stderr.
 	Logger *log.Logger
 }
 
@@ -151,7 +152,8 @@ func (s *Server) Handler() http.Handler {
 		s.renderError(w, http.StatusNotFound, "Page not found.")
 	})
 
-	return securityHeaders(http.NewCrossOriginProtection().Handler(mux))
+	// Logging is outermost so rejected cross-origin requests are logged too.
+	return logRequests(s.opts.Logger, securityHeaders(http.NewCrossOriginProtection().Handler(mux)))
 }
 
 // locked runs h while holding the server mutex.
