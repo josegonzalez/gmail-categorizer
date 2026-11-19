@@ -1,0 +1,6 @@
+From: News <news@example.com>
+To: newsletter@example.com
+Subject: Weekly
+Content-Type: text/html; charset=utf-8
+
+<html><head><title>Ignored</title><style>p{color:red}</style></head><body><h1>This week</h1><p>Tools &amp; tips</p><script>alert(1)</script><ul><li>One</li><li>Two</li></ul></body></html>

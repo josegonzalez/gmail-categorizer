@@ -107,3 +107,14 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "sender@example.com", msg.From[0].String())
 	assert.Equal(t, "recipient@example.com", msg.To[0].String())
 }
+
+func TestFormatAddresses(t *testing.T) {
+	addrs := []Address{
+		{Name: "Alice", Mailbox: "alice", Host: "example.com"},
+		{Mailbox: "bob", Host: "example.com"},
+		{Name: "Undisclosed recipients"},
+		{},
+	}
+	assert.Equal(t, "Alice <alice@example.com>, bob@example.com, Undisclosed recipients", FormatAddresses(addrs))
+	assert.Equal(t, "", FormatAddresses(nil))
+}

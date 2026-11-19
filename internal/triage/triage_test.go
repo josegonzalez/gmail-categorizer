@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -308,4 +309,135 @@ func TestTriager_Archive_Error(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "archiving")
 	assert.Nil(t, result)
+}
+
+func TestTriager_LoadGroupings_KeepsEnvelopesNewestFirst(t *testing.T) {
+	now := time.Now()
+	to := []imap.Address{{Mailbox: "user", Host: "example.com"}}
+	messages := []*imap.Message{
+		{UID: 1, Subject: "Oldest", Date: now.Add(-2 * time.Hour), To: to},
+		{UID: 2, Subject: "Newest", Date: now, To: to},
+		{UID: 3, Subject: "Middle", Date: now.Add(-1 * time.Hour), To: to},
+	}
+
+	fetchByUIDCalled := false
+	client := &mockClient{
+		FetchMessagesFunc: func(ctx context.Context, handler imap.MessageHandler, progress imap.ProgressCallback) error {
+			for _, msg := range messages {
+				if err := handler(msg); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		FetchMessagesWithUIDsFunc: func(ctx context.Context, uids []uint32, handler imap.MessageHandler) error {
+			fetchByUIDCalled = true
+			return nil
+		},
+	}
+
+	triager := NewTriager(client, []string{})
+	groupings, err := triager.LoadGroupings(context.Background())
+	require.NoError(t, err)
+	require.Len(t, groupings, 1)
+
+	g := groupings[0]
+	require.Len(t, g.Messages, 3)
+	assert.Equal(t, "Newest", g.Messages[0].Subject)
+	assert.Equal(t, "Middle", g.Messages[1].Subject)
+	assert.Equal(t, "Oldest", g.Messages[2].Subject)
+	assert.Equal(t, "", g.Subject, "subject is still cleared for multi-message groupings")
+
+	require.NoError(t, triager.LoadMessages(context.Background(), g))
+	assert.False(t, fetchByUIDCalled, "LoadMessages should reuse envelopes from LoadGroupings")
+}
+
+func TestTriager_LoadMessageBody(t *testing.T) {
+	var fetchedUID uint32
+	client := &mockClient{
+		FetchMessageBodyFunc: func(ctx context.Context, uid uint32) (*imap.MessageBody, error) {
+			fetchedUID = uid
+			return &imap.MessageBody{Text: "hello"}, nil
+		},
+	}
+
+	triager := NewTriager(client, []string{})
+	g := &Grouping{Address: "test@example.com", UIDs: []uint32{7, 8}}
+
+	body, err := triager.LoadMessageBody(context.Background(), g, 8)
+
+	require.NoError(t, err)
+	assert.Equal(t, "hello", body.Text)
+	assert.Equal(t, uint32(8), fetchedUID)
+}
+
+func TestTriager_LoadMessageBody_UnknownUID(t *testing.T) {
+	called := false
+	client := &mockClient{
+		FetchMessageBodyFunc: func(ctx context.Context, uid uint32) (*imap.MessageBody, error) {
+			called = true
+			return nil, nil
+		},
+	}
+
+	triager := NewTriager(client, []string{})
+	g := &Grouping{Address: "test@example.com", UIDs: []uint32{7}}
+
+	_, err := triager.LoadMessageBody(context.Background(), g, 99)
+
+	require.Error(t, err)
+	assert.False(t, called, "should not fetch a UID outside the grouping")
+}
+
+func TestTriager_LoadMessageBody_Error(t *testing.T) {
+	expectedErr := errors.New("fetch failed")
+	client := &mockClient{
+		FetchMessageBodyFunc: func(ctx context.Context, uid uint32) (*imap.MessageBody, error) {
+			return nil, expectedErr
+		},
+	}
+
+	triager := NewTriager(client, []string{})
+	g := &Grouping{Address: "test@example.com", UIDs: []uint32{7}}
+
+	_, err := triager.LoadMessageBody(context.Background(), g, 7)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, expectedErr)
+}
+
+func TestArchiveBatch(t *testing.T) {
+	expectedErr := errors.New("archive failed")
+	client := &mockClient{
+		ArchiveToFolderFunc: func(ctx context.Context, uids []uint32, folder string) error {
+			if folder == "automated/bad" {
+				return expectedErr
+			}
+			return nil
+		},
+	}
+
+	triager := NewTriager(client, []string{})
+	groupings := []*Grouping{
+		{Address: "good@example.com", UIDs: []uint32{1, 2}},
+		{Address: "bad@example.com", UIDs: []uint32{3}},
+		{Address: "also@example.com", UIDs: []uint32{4}},
+	}
+
+	results := ArchiveBatch(context.Background(), triager, groupings)
+
+	require.Len(t, results, 3)
+	assert.Equal(t, "good@example.com", results[0].Address)
+	assert.NoError(t, results[0].Err)
+	assert.Equal(t, 2, results[0].Result.ArchivedCount)
+	assert.Equal(t, "bad@example.com", results[1].Address)
+	assert.ErrorIs(t, results[1].Err, expectedErr)
+	assert.Nil(t, results[1].Result)
+	assert.Equal(t, "also@example.com", results[2].Address)
+	assert.NoError(t, results[2].Err, "a failure should not stop later groupings")
+}
+
+func TestArchiveBatch_Empty(t *testing.T) {
+	triager := NewTriager(&mockClient{}, []string{})
+	assert.Empty(t, ArchiveBatch(context.Background(), triager, nil))
 }

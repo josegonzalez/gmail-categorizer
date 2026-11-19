@@ -13,6 +13,7 @@ import (
 type Triager interface {
 	LoadGroupings(ctx context.Context) ([]*Grouping, error)
 	LoadMessages(ctx context.Context, g *Grouping) error
+	LoadMessageBody(ctx context.Context, g *Grouping, uid uint32) (*imap.MessageBody, error)
 	Archive(ctx context.Context, g *Grouping) (*TriageResult, error)
 }
 
@@ -31,6 +32,8 @@ func NewTriager(client imap.Client, groupByFrom []string) Triager {
 }
 
 // LoadGroupings fetches all inbox messages and groups them by recipient address.
+// Each grouping keeps the envelopes it was built from in Messages, newest
+// first, so callers can list subjects without fetching again.
 func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 	// Group messages by recipient
 	groupMap := make(map[string]*Grouping)
@@ -44,6 +47,7 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 		if g, exists := groupMap[address]; exists {
 			g.Count++
 			g.UIDs = append(g.UIDs, msg.UID)
+			g.Messages = append(g.Messages, msg)
 			g.Subject = ""
 		} else {
 			groupMap[address] = &Grouping{
@@ -51,6 +55,7 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 				Count:         1,
 				Subject:       msg.Subject,
 				UIDs:          []uint32{msg.UID},
+				Messages:      []*imap.Message{msg},
 				GroupedByFrom: isGroupedByFrom,
 			}
 		}
@@ -64,6 +69,7 @@ func (t *triager) LoadGroupings(ctx context.Context) ([]*Grouping, error) {
 	// Convert map to slice and sort by count
 	groupings := make([]*Grouping, 0, len(groupMap))
 	for _, g := range groupMap {
+		SortMessages(g.Messages, SortDateDesc)
 		groupings = append(groupings, g)
 	}
 
@@ -112,6 +118,18 @@ func (t *triager) LoadMessages(ctx context.Context, g *Grouping) error {
 	return t.client.FetchMessagesWithUIDs(ctx, g.UIDs, handler)
 }
 
+// LoadMessageBody fetches the body of one message in the grouping.
+func (t *triager) LoadMessageBody(ctx context.Context, g *Grouping, uid uint32) (*imap.MessageBody, error) {
+	if !g.HasUID(uid) {
+		return nil, fmt.Errorf("message %d is not in grouping %s", uid, g.Address)
+	}
+	body, err := t.client.FetchMessageBody(ctx, uid)
+	if err != nil {
+		return nil, fmt.Errorf("loading message body: %w", err)
+	}
+	return body, nil
+}
+
 // Archive archives all messages in the grouping to a folder based on the address.
 func (t *triager) Archive(ctx context.Context, g *Grouping) (*TriageResult, error) {
 	destFolder := g.DestinationFolder()
@@ -125,4 +143,19 @@ func (t *triager) Archive(ctx context.Context, g *Grouping) (*TriageResult, erro
 		ArchivedCount:     len(g.UIDs),
 		DestinationFolder: destFolder,
 	}, nil
+}
+
+// ArchiveBatch archives each grouping in order, carrying on past failures so
+// one bad grouping does not stop the rest.
+func ArchiveBatch(ctx context.Context, t Triager, groupings []*Grouping) []BatchResult {
+	results := make([]BatchResult, 0, len(groupings))
+	for _, g := range groupings {
+		result, err := t.Archive(ctx, g)
+		results = append(results, BatchResult{
+			Address: g.Address,
+			Result:  result,
+			Err:     err,
+		})
+	}
+	return results
 }

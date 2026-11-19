@@ -1,0 +1,75 @@
+{{define "refresh-filter"}}{{if eq .Filter "by-sender"}}<input type="hidden" name="filter" value="by-sender">{{end}}{{end}}
+
+{{define "content"}}
+{{with .Flash}}
+<div class="flash" role="status" data-flash>
+  <div class="flash-body">
+    {{if .Archived}}<p>{{.Archived}}</p>{{end}}
+    {{range .Failed}}<p class="flash-error">Could not archive {{.}}</p>{{end}}
+    {{range .Missing}}<p class="flash-error">{{.}} is no longer in the inbox.</p>{{end}}
+  </div>
+  <button type="button" class="icon-button" aria-label="Dismiss" data-dismiss>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+  </button>
+</div>
+{{end}}
+
+<form method="post" action="/archive" id="archive-form" data-archive-form>
+  {{if eq .Filter "by-sender"}}<input type="hidden" name="filter" value="by-sender">{{end}}
+  <div class="toolbar">
+    <div class="toolbar-start">
+      <label class="check-target">
+        <input type="checkbox" aria-label="Select all groupings" data-select-all>
+      </label>
+      <button class="text-button archive-button" type="submit" data-archive-button>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"></rect><path d="M5 9v10h14V9"></path><path d="M10 13h4"></path></svg>
+        <span data-archive-label>Archive</span>
+      </button>
+    </div>
+    <div class="toolbar-end">
+      <nav class="segmented" aria-label="Filter">
+        <a href="{{.AllURL}}" {{if eq .Filter "all"}}class="active" aria-current="page"{{end}}>All {{.Total}}</a>
+        <a href="{{.BySenderURL}}" {{if eq .Filter "by-sender"}}class="active" aria-current="page"{{end}} data-filter-toggle="{{.ToggleURL}}">By sender {{.BySender}}</a>
+      </nav>
+      <span class="summary">{{.Total}} groupings, {{.Messages}} messages</span>
+    </div>
+  </div>
+
+  {{if .Groupings}}
+  <ul class="groupings" data-rows>
+    {{range .Groupings}}
+    <li class="grouping" data-row>
+      <label class="check-target">
+        <input type="checkbox" name="address" value="{{.Address}}" aria-label="Select {{.Address}}" data-row-check>
+      </label>
+      <div class="grouping-main">
+        <a class="grouping-head" href="{{.URL}}" data-row-link>
+          <span class="grouping-address">
+            <span class="address">{{.Address}}</span>
+            {{if .BySender}}<span class="badge">by sender</span>{{end}}
+          </span>
+          <span class="count">{{.Count}}</span>
+          <span class="folder">{{.Folder}}</span>
+        </a>
+        <ul class="subjects" tabindex="0" aria-label="Messages to {{.Address}}">
+          {{range .Subjects}}
+          <li><a href="{{.URL}}"><span class="subject">{{.Subject}}</span><span class="date">{{.Date}}</span></a></li>
+          {{end}}
+        </ul>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="empty">{{if eq .Filter "by-sender"}}No groupings by sender.{{else}}The inbox is empty.{{end}}</p>
+  {{end}}
+</form>
+{{end}}
+
+{{define "shortcuts"}}
+<span><kbd>j</kbd> / <kbd>k</kbd> move</span>
+<span><kbd>x</kbd> select</span>
+<span><kbd>o</kbd> open</span>
+<span><kbd>e</kbd> archive</span>
+<span><kbd>f</kbd> toggle filter</span>
+{{end}}

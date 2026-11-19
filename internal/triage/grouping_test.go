@@ -82,3 +82,29 @@ func TestTriageResult(t *testing.T) {
 	assert.Equal(t, 10, result.ArchivedCount)
 	assert.Equal(t, "automated/test", result.DestinationFolder)
 }
+
+func TestGrouping_HasUID(t *testing.T) {
+	g := &Grouping{UIDs: []uint32{1, 5, 9}}
+	assert.True(t, g.HasUID(5))
+	assert.False(t, g.HasUID(2))
+	assert.False(t, (&Grouping{}).HasUID(1))
+}
+
+func TestGrouping_GmailSearchQuery(t *testing.T) {
+	byTo := &Grouping{Address: "notifications@example.com"}
+	assert.Equal(t, "deliveredto:notifications@example.com in:inbox", byTo.GmailSearchQuery())
+
+	byFrom := &Grouping{Address: "alerts@monitor.example", GroupedByFrom: true}
+	assert.Equal(t, "from:alerts@monitor.example in:inbox", byFrom.GmailSearchQuery())
+}
+
+func TestGrouping_GmailSearchURL(t *testing.T) {
+	g := &Grouping{Address: "user+tag@example.com"}
+
+	assert.Equal(t,
+		"https://mail.google.com/mail/?authuser=me%40example.com#search/deliveredto:user%2Btag@example.com%20in:inbox",
+		g.GmailSearchURL("me@example.com"))
+	assert.Equal(t,
+		"https://mail.google.com/mail/#search/deliveredto:user%2Btag@example.com%20in:inbox",
+		g.GmailSearchURL(""))
+}

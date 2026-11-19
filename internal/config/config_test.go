@@ -35,6 +35,17 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, FormatTable, cfg.Output.Format)
 	assert.Equal(t, SortByCount, cfg.Output.SortBy)
 	assert.Equal(t, SortDesc, cfg.Output.SortOrder)
+	assert.Equal(t, DefaultWebListen, cfg.Web.Listen)
+}
+
+func TestLoad_WebListenEnvOverride(t *testing.T) {
+	t.Setenv("GMAIL_CATEGORIZER_WEB_LISTEN", "127.0.0.1:9090")
+
+	v := viper.New()
+	cfg, err := Load(v, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1:9090", cfg.Web.Listen)
 }
 
 func TestLoad_EnvOverrides(t *testing.T) {
@@ -71,6 +82,8 @@ special:
   group_by_from:
     - support@
     - info@
+web:
+  listen: 127.0.0.1:3000
 `
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
 	require.NoError(t, err)
@@ -87,6 +100,7 @@ special:
 	assert.Equal(t, "address", cfg.Output.SortBy)
 	assert.Equal(t, 50, cfg.Output.Limit)
 	assert.Equal(t, []string{"support@", "info@"}, cfg.Special.GroupByFrom)
+	assert.Equal(t, "127.0.0.1:3000", cfg.Web.Listen)
 }
 
 func TestLoad_MissingConfigFile(t *testing.T) {

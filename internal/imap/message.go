@@ -2,6 +2,7 @@
 package imap
 
 import (
+	"strings"
 	"time"
 
 	"github.com/josegonzalez/gmail-categorizer/pkg/mailaddr"
@@ -29,11 +30,32 @@ func (a Address) String() string {
 	return mailaddr.Format(a.Mailbox, a.Host)
 }
 
+// FormatAddresses formats addresses as "Name <mailbox@host>", comma
+// separated, falling back to whichever of the name or address is present.
+func FormatAddresses(addrs []Address) string {
+	parts := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		addr := a.String()
+		switch {
+		case a.Name != "" && addr != "":
+			parts = append(parts, a.Name+" <"+addr+">")
+		case addr != "":
+			parts = append(parts, addr)
+		case a.Name != "":
+			parts = append(parts, a.Name)
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 // MailboxInfo contains metadata about a mailbox.
 type MailboxInfo struct {
 	Name        string
 	NumMessages uint32
 	NumUnseen   uint32
+	// UIDValidity changes when the server renumbers UIDs, which makes any
+	// cached UIDs from this mailbox invalid.
+	UIDValidity uint32
 }
 
 // MessageHandler is called for each message during fetch operations.

@@ -169,7 +169,7 @@ func TestModel_Update_BatchArchiveResultMsg(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 
-	results := []batchArchiveEntry{
+	results := []triage.BatchResult{
 		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5, DestinationFolder: "automated/a"}},
 		{Address: "b@test.com", Result: &triage.TriageResult{ArchivedCount: 3, DestinationFolder: "automated/b"}},
 	}
@@ -470,12 +470,13 @@ func TestModel_HandleConfirmKeys_No_BatchArchive(t *testing.T) {
 	assert.Equal(t, ViewGroupings, m.view)
 }
 
-func TestModel_HandleConfirmKeys_No_WithMessages(t *testing.T) {
+func TestModel_HandleConfirmKeys_No_FromSubjects(t *testing.T) {
 	ctx := context.Background()
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewConfirm
 	model.confirmAction = "archive"
+	model.confirmReturnView = ViewSubjects
 	model.selectedGrouping = &triage.Grouping{
 		Address:  "test@example.com",
 		Messages: []*imap.Message{{Subject: "test"}},
@@ -486,6 +487,31 @@ func TestModel_HandleConfirmKeys_No_WithMessages(t *testing.T) {
 
 	m := newModel.(Model)
 	assert.Equal(t, ViewSubjects, m.view)
+	assert.NotNil(t, m.selectedGrouping)
+}
+
+func TestModel_HandleConfirmKeys_No_FromGroupingsWithMessagesLoaded(t *testing.T) {
+	// Envelopes are loaded with the groupings, so having messages must not
+	// send a cancelled single archive from the groupings list to subjects.
+	ctx := context.Background()
+	triager := &mockTriager{}
+	g := &triage.Grouping{
+		Address:  "test@example.com",
+		Count:    1,
+		Messages: []*imap.Message{{Subject: "test"}},
+	}
+	model := NewModel(ctx, triager)
+	model.view = ViewGroupings
+	model.groupings = []*triage.Grouping{g}
+
+	newModel, _ := model.handleGroupingsKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m := newModel.(Model)
+	require.Equal(t, ViewConfirm, m.view)
+
+	newModel, _ = m.handleConfirmKeys(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = newModel.(Model)
+	assert.Equal(t, ViewGroupings, m.view)
+	assert.Nil(t, m.selectedGrouping)
 }
 
 func TestModel_HandleResultKeys_Continue(t *testing.T) {
@@ -513,7 +539,7 @@ func TestModel_HandleResultKeys_Continue_ClearsBatchState(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewResult
-	model.archiveResults = []batchArchiveEntry{
+	model.archiveResults = []triage.BatchResult{
 		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5}},
 	}
 	model.checkedGroupings = map[int]bool{0: true}
@@ -697,7 +723,7 @@ func TestModel_View_Result_Batch(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewResult
-	model.archiveResults = []batchArchiveEntry{
+	model.archiveResults = []triage.BatchResult{
 		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5, DestinationFolder: "automated/a"}},
 		{Address: "b@test.com", Result: &triage.TriageResult{ArchivedCount: 3, DestinationFolder: "automated/b"}},
 	}
@@ -713,7 +739,7 @@ func TestModel_View_Result_Batch_WithFailure(t *testing.T) {
 	triager := &mockTriager{}
 	model := NewModel(ctx, triager)
 	model.view = ViewResult
-	model.archiveResults = []batchArchiveEntry{
+	model.archiveResults = []triage.BatchResult{
 		{Address: "a@test.com", Result: &triage.TriageResult{ArchivedCount: 5, DestinationFolder: "automated/a"}},
 		{Address: "b@test.com", Err: errors.New("timeout")},
 	}

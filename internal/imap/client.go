@@ -3,6 +3,7 @@ package imap
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -19,10 +20,12 @@ type Client interface {
 	SelectMailbox(name string) (*MailboxInfo, error)
 	FetchMessages(ctx context.Context, handler MessageHandler, progress ProgressCallback) error
 	FetchMessagesWithUIDs(ctx context.Context, uids []uint32, handler MessageHandler) error
+	FetchMessageBody(ctx context.Context, uid uint32) (*MessageBody, error)
 	MoveMessages(ctx context.Context, uids []uint32, destMailbox string) error
 	ArchiveToFolder(ctx context.Context, uids []uint32, folder string) error
 	CreateMailbox(ctx context.Context, name string) error
 	ListMailboxes(ctx context.Context) ([]string, error)
+	Noop() error
 	Logout() error
 	Close() error
 }
@@ -96,6 +99,7 @@ func (c *gmailClient) SelectMailbox(name string) (*MailboxInfo, error) {
 	return &MailboxInfo{
 		Name:        name,
 		NumMessages: data.NumMessages,
+		UIDValidity: data.UIDValidity,
 	}, nil
 }
 
@@ -217,6 +221,17 @@ func convertAddresses(addrs []imap.Address) []Address {
 	return result
 }
 
+// Noop sends a NOOP command, which fails when the connection has dropped.
+func (c *gmailClient) Noop() error {
+	if err := c.requireConnected(); err != nil {
+		return err
+	}
+	if err := c.client.Noop().Wait(); err != nil {
+		return fmt.Errorf("checking connection: %w", err)
+	}
+	return nil
+}
+
 // Logout logs out from the IMAP server.
 func (c *gmailClient) Logout() error {
 	if c.client == nil {
@@ -290,6 +305,65 @@ func (c *gmailClient) FetchMessagesWithUIDs(ctx context.Context, uids []uint32, 
 	}
 
 	return fetchCmd.Close()
+}
+
+// FetchMessageBody retrieves and parses the body of a single message by UID.
+// It uses BODY.PEEK so viewing a message does not mark it as read, and fetches
+// at most MaxBodySize bytes.
+func (c *gmailClient) FetchMessageBody(ctx context.Context, uid uint32) (*MessageBody, error) {
+	if err := c.requireConnected(); err != nil {
+		return nil, err
+	}
+
+	var uidSet imap.UIDSet
+	uidSet.AddNum(imap.UID(uid))
+
+	section := &imap.FetchItemBodySection{
+		Peek:    true,
+		Partial: &imap.SectionPartial{Offset: 0, Size: MaxBodySize},
+	}
+	fetchCmd := c.client.Fetch(uidSet, &imap.FetchOptions{
+		UID:         true,
+		BodySection: []*imap.FetchItemBodySection{section},
+	})
+
+	var body *MessageBody
+	for {
+		if err := ctx.Err(); err != nil {
+			fetchCmd.Close()
+			return nil, err
+		}
+
+		msg := fetchCmd.Next()
+		if msg == nil {
+			break
+		}
+
+		for {
+			item := msg.Next()
+			if item == nil {
+				break
+			}
+			data, ok := item.(imapclient.FetchItemDataBodySection)
+			if !ok || data.Literal == nil || body != nil {
+				continue
+			}
+			parsed, err := parseBody(io.LimitReader(data.Literal, MaxBodySize))
+			if err != nil {
+				fetchCmd.Close()
+				return nil, err
+			}
+			body = parsed
+		}
+	}
+
+	if err := fetchCmd.Close(); err != nil {
+		return nil, fmt.Errorf("fetching message %d: %w", uid, err)
+	}
+	if body == nil {
+		return nil, fmt.Errorf("message %d not found", uid)
+	}
+	return body, nil
 }
 
 // ListMailboxes returns all available mailboxes.

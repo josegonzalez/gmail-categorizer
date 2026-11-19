@@ -6,18 +6,21 @@ import (
 
 // KeyMap defines all keybindings for the application.
 type KeyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Select  key.Binding
-	Archive key.Binding
-	Toggle  key.Binding
-	Sort    key.Binding
-	Filter  key.Binding
-	Back    key.Binding
-	Quit    key.Binding
-	Confirm key.Binding
-	Cancel  key.Binding
-	Help    key.Binding
+	Up                 key.Binding
+	Down               key.Binding
+	ScrollSubjectsUp   key.Binding
+	ScrollSubjectsDown key.Binding
+	Select             key.Binding
+	Archive            key.Binding
+	Toggle             key.Binding
+	Sort               key.Binding
+	Filter             key.Binding
+	OpenGmail          key.Binding
+	Back               key.Binding
+	Quit               key.Binding
+	Confirm            key.Binding
+	Cancel             key.Binding
+	Help               key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings.
@@ -30,6 +33,14 @@ func DefaultKeyMap() KeyMap {
 		Down: key.NewBinding(
 			key.WithKeys("down", "j"),
 			key.WithHelp("↓/j", "down"),
+		),
+		ScrollSubjectsUp: key.NewBinding(
+			key.WithKeys("K"),
+			key.WithHelp("K", "scroll subjects up"),
+		),
+		ScrollSubjectsDown: key.NewBinding(
+			key.WithKeys("J"),
+			key.WithHelp("J", "scroll subjects down"),
 		),
 		Select: key.NewBinding(
 			key.WithKeys("enter"),
@@ -50,6 +61,10 @@ func DefaultKeyMap() KeyMap {
 		Filter: key.NewBinding(
 			key.WithKeys("f"),
 			key.WithHelp("f", "filter"),
+		),
+		OpenGmail: key.NewBinding(
+			key.WithKeys("g"),
+			key.WithHelp("g", "open in Gmail"),
 		),
 		Back: key.NewBinding(
 			key.WithKeys("esc", "backspace"),
@@ -76,14 +91,14 @@ func DefaultKeyMap() KeyMap {
 
 // ShortHelp returns keybindings to show in the short help view.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Select, k.Archive, k.Toggle, k.Sort, k.Filter, k.Back, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.ScrollSubjectsUp, k.ScrollSubjectsDown, k.Select, k.Archive, k.Toggle, k.Sort, k.Filter, k.OpenGmail, k.Back, k.Quit}
 }
 
 // FullHelp returns keybindings for the expanded help view.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down},
-		{k.Select, k.Archive, k.Toggle, k.Sort, k.Filter, k.Back},
+		{k.Up, k.Down, k.ScrollSubjectsUp, k.ScrollSubjectsDown},
+		{k.Select, k.Archive, k.Toggle, k.Sort, k.Filter, k.OpenGmail, k.Back},
 		{k.Help, k.Quit},
 	}
 }
