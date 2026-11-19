@@ -6,8 +6,12 @@ import (
 	"sort"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
+	"github.com/josegonzalez/gmail-categorizer/internal/browser"
+	"github.com/josegonzalez/gmail-categorizer/internal/imap"
 	"github.com/josegonzalez/gmail-categorizer/internal/triage"
 	"github.com/josegonzalez/gmail-categorizer/internal/tui/views"
 )
@@ -30,14 +34,8 @@ const (
 	ViewConfirm
 	ViewResult
 	ViewError
+	ViewMessage
 )
-
-// batchArchiveEntry holds the result of archiving a single grouping in a batch.
-type batchArchiveEntry struct {
-	Address string
-	Result  *triage.TriageResult
-	Err     error
-}
 
 // Model represents the main TUI application state.
 type Model struct {
@@ -51,11 +49,18 @@ type Model struct {
 	spinner  spinner.Model
 	quitting bool
 
+	// username is the Gmail account, used to build Gmail search links.
+	username string
+	// openURL opens a URL in the browser; swapped out in tests.
+	openURL func(url string) error
+
 	// Groupings view
 	groupings        []*triage.Grouping
 	groupingsCursor  int
 	checkedGroupings map[int]bool
 	groupingFilter   GroupingFilter
+	previewOffset    int
+	status           string
 
 	// Subjects view
 	selectedGrouping *triage.Grouping
@@ -63,15 +68,20 @@ type Model struct {
 	subjectsOffset   int
 	subjectsSortMode SortMode
 
+	// Message view
+	selectedMessage *imap.Message
+	messageViewport viewport.Model
+
 	// Confirm view
-	confirmAction string
+	confirmAction     string
+	confirmReturnView ViewState
 
 	// Loading view
 	loadingAction string
 
 	// Result view
 	result         *triage.TriageResult
-	archiveResults []batchArchiveEntry
+	archiveResults []triage.BatchResult
 }
 
 // NewModel creates a new TUI model.
@@ -87,7 +97,14 @@ func NewModel(ctx context.Context, triager triage.Triager) Model {
 		view:             ViewLoading,
 		spinner:          s,
 		checkedGroupings: make(map[int]bool),
+		openURL:          browser.Open,
 	}
+}
+
+// WithOptions returns a copy of the model configured with opts.
+func (m Model) WithOptions(opts Options) Model {
+	m.username = opts.Username
+	return m
 }
 
 // Init initializes the model.
@@ -104,6 +121,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		if m.view == ViewMessage {
+			m.resizeMessageViewport()
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -120,6 +140,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case groupingsLoadedMsg:
 		m.groupings = msg.groupings
 		m.checkedGroupings = make(map[int]bool)
+		m.previewOffset = 0
 		m.view = ViewGroupings
 		if len(m.groupings) == 0 {
 			m.err = fmt.Errorf("no messages in inbox")
@@ -130,8 +151,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messagesLoadedMsg:
 		m.view = ViewSubjects
 		if m.selectedGrouping != nil {
-			sortMessages(m.selectedGrouping.Messages, m.subjectsSortMode)
+			triage.SortMessages(m.selectedGrouping.Messages, m.subjectsSortMode)
 		}
+		return m, nil
+
+	case bodyLoadedMsg:
+		m.view = ViewMessage
+		m.resizeMessageViewport()
+		m.messageViewport.SetContent(msg.body.PlainText())
+		m.messageViewport.GotoTop()
 		return m, nil
 
 	case archiveResultMsg:
@@ -168,6 +196,8 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleGroupingsKeys(msg)
 	case ViewSubjects:
 		return m.handleSubjectsKeys(msg)
+	case ViewMessage:
+		return m.handleMessageKeys(msg)
 	case ViewConfirm:
 		return m.handleConfirmKeys(msg)
 	case ViewResult:
@@ -182,6 +212,7 @@ func (m Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	filtered := m.filteredGroupings()
 	indices := m.filteredGroupingIndices()
+	m.status = ""
 
 	switch {
 	case msg.String() == "q" || msg.String() == "ctrl+c":
@@ -191,11 +222,23 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "up" || msg.String() == "k":
 		if m.groupingsCursor > 0 {
 			m.groupingsCursor--
+			m.previewOffset = 0
 		}
 
 	case msg.String() == "down" || msg.String() == "j":
 		if m.groupingsCursor < len(filtered)-1 {
 			m.groupingsCursor++
+			m.previewOffset = 0
+		}
+
+	case msg.String() == "K":
+		if m.previewOffset > 0 {
+			m.previewOffset--
+		}
+
+	case msg.String() == "J":
+		if len(filtered) > 0 && m.previewOffset < views.MaxPreviewOffset(filtered[m.groupingsCursor]) {
+			m.previewOffset++
 		}
 
 	case msg.String() == " ":
@@ -221,6 +264,7 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "a":
 		if len(filtered) > 0 {
+			m.confirmReturnView = ViewGroupings
 			if len(m.checkedGroupings) > 0 {
 				// Batch archive
 				m.confirmAction = "batch-archive"
@@ -234,6 +278,16 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case msg.String() == "g":
+		if len(filtered) > 0 {
+			g := filtered[m.groupingsCursor]
+			if err := m.openURL(g.GmailSearchURL(m.username)); err != nil {
+				m.status = fmt.Sprintf("Could not open Gmail: %v", err)
+			} else {
+				m.status = fmt.Sprintf("Opened Gmail search for %s", g.Address)
+			}
+		}
+
 	case msg.String() == "f":
 		if m.groupingFilter == FilterAll {
 			m.groupingFilter = FilterSpecial
@@ -241,6 +295,7 @@ func (m Model) handleGroupingsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.groupingFilter = FilterAll
 		}
 		m.groupingsCursor = 0
+		m.previewOffset = 0
 		m.checkedGroupings = make(map[int]bool)
 	}
 
@@ -255,9 +310,14 @@ func (m Model) handleSubjectsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case msg.String() == "esc" || msg.String() == "backspace":
+		if m.selectedGrouping != nil {
+			// Keep the groupings preview newest first after a subject sort.
+			triage.SortMessages(m.selectedGrouping.Messages, SortDateDesc)
+		}
 		m.view = ViewGroupings
 		m.selectedGrouping = nil
 		m.subjectsSortMode = SortDateDesc
+		m.previewOffset = 0
 
 	case msg.String() == "up" || msg.String() == "k":
 		if m.subjectsCursor > 0 {
@@ -269,19 +329,52 @@ func (m Model) handleSubjectsKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.subjectsCursor++
 		}
 
+	case msg.String() == "enter":
+		if m.selectedGrouping != nil && m.subjectsCursor < len(m.selectedGrouping.Messages) {
+			m.selectedMessage = m.selectedGrouping.Messages[m.subjectsCursor]
+			m.view = ViewLoading
+			m.loadingAction = "loading-body"
+			return m, tea.Batch(m.spinner.Tick, m.loadMessageBody)
+		}
+
 	case msg.String() == "s":
-		m.subjectsSortMode = (m.subjectsSortMode + 1) % 4
+		m.subjectsSortMode = m.subjectsSortMode.Next()
 		if m.selectedGrouping != nil {
-			sortMessages(m.selectedGrouping.Messages, m.subjectsSortMode)
+			triage.SortMessages(m.selectedGrouping.Messages, m.subjectsSortMode)
 			m.subjectsCursor = 0
 		}
 
 	case msg.String() == "a":
 		m.confirmAction = "archive"
+		m.confirmReturnView = ViewSubjects
 		m.view = ViewConfirm
 	}
 
 	return m, nil
+}
+
+// handleMessageKeys handles keys in the message view.
+func (m Model) handleMessageKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		m.quitting = true
+		return m, tea.Quit
+
+	case "esc", "backspace":
+		m.view = ViewSubjects
+		m.selectedMessage = nil
+		return m, nil
+
+	case "a":
+		m.confirmAction = "archive"
+		m.confirmReturnView = ViewMessage
+		m.view = ViewConfirm
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.messageViewport, cmd = m.messageViewport.Update(msg)
+	return m, cmd
 }
 
 // handleConfirmKeys handles keys in the confirm view.
@@ -297,12 +390,14 @@ func (m Model) handleConfirmKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Tick, m.doArchive)
 
 	case msg.String() == "n" || msg.String() == "esc":
-		if m.confirmAction == "batch-archive" {
+		m.view = m.confirmReturnView
+		if m.view == ViewConfirm || m.view == ViewLoading {
 			m.view = ViewGroupings
-		} else if m.selectedGrouping != nil && len(m.selectedGrouping.Messages) > 0 {
-			m.view = ViewSubjects
-		} else {
-			m.view = ViewGroupings
+		}
+		if m.view == ViewGroupings && m.confirmAction == "archive" {
+			// The single-archive target came from the cursor, not a
+			// subjects view the user opened.
+			m.selectedGrouping = nil
 		}
 	}
 
@@ -319,6 +414,7 @@ func (m Model) handleResultKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "enter" || msg.String() == "esc":
 		// Reset and reload groupings
 		m.selectedGrouping = nil
+		m.selectedMessage = nil
 		m.result = nil
 		m.archiveResults = nil
 		m.checkedGroupings = make(map[int]bool)
@@ -341,11 +437,31 @@ func (m Model) handleErrorKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// resizeMessageViewport sizes the body viewport to the terminal.
+func (m *Model) resizeMessageViewport() {
+	width, height := m.width, m.height
+	if width <= 0 {
+		width = 80
+	}
+	if height <= 0 {
+		height = 24
+	}
+	bodyHeight := max(height-views.MessageHeaderLines, 3)
+	if m.messageViewport.Width == 0 && m.messageViewport.Height == 0 {
+		m.messageViewport = viewport.New(width, bodyHeight)
+	} else {
+		m.messageViewport.Width = width
+		m.messageViewport.Height = bodyHeight
+	}
+	m.messageViewport.Style = lipgloss.NewStyle().Width(width)
+}
+
 // Message types for async operations
 type groupingsLoadedMsg struct{ groupings []*triage.Grouping }
 type messagesLoadedMsg struct{}
+type bodyLoadedMsg struct{ body *imap.MessageBody }
 type archiveResultMsg struct{ result *triage.TriageResult }
-type batchArchiveResultMsg struct{ results []batchArchiveEntry }
+type batchArchiveResultMsg struct{ results []triage.BatchResult }
 type errMsg struct{ err error }
 
 // loadGroupings loads email groupings asynchronously.
@@ -368,12 +484,24 @@ func (m Model) loadMessages() tea.Msg {
 	return messagesLoadedMsg{}
 }
 
+// loadMessageBody loads the body of the selected message.
+func (m Model) loadMessageBody() tea.Msg {
+	if m.selectedGrouping == nil || m.selectedMessage == nil {
+		return errMsg{fmt.Errorf("no message selected")}
+	}
+	body, err := m.triager.LoadMessageBody(m.ctx, m.selectedGrouping, m.selectedMessage.UID)
+	if err != nil {
+		return errMsg{err}
+	}
+	return bodyLoadedMsg{body}
+}
+
 // doArchive performs the archive operation.
 func (m Model) doArchive() tea.Msg {
 	if m.selectedGrouping == nil {
 		return errMsg{fmt.Errorf("no grouping selected")}
 	}
-	result, err := m.triager.Archive(m.ctx, m.selectedGrouping)
+	result, err := m.triager.Archive(m.ctx, m.selectedGrouping, nil)
 	if err != nil {
 		return errMsg{err}
 	}
@@ -435,17 +563,7 @@ func (m Model) doBatchArchive() tea.Msg {
 	if len(groupings) == 0 {
 		return errMsg{fmt.Errorf("no groupings selected")}
 	}
-
-	results := make([]batchArchiveEntry, 0, len(groupings))
-	for _, g := range groupings {
-		result, err := m.triager.Archive(m.ctx, g)
-		results = append(results, batchArchiveEntry{
-			Address: g.Address,
-			Result:  result,
-			Err:     err,
-		})
-	}
-	return batchArchiveResultMsg{results}
+	return batchArchiveResultMsg{triage.ArchiveBatch(m.ctx, m.triager, groupings, nil)}
 }
 
 // View renders the current view.
@@ -460,6 +578,8 @@ func (m Model) View() string {
 		if m.loadingAction == "batch-archiving" {
 			checkedGroupings := m.checkedGroupingsList()
 			msg = fmt.Sprintf("Archiving %d groupings...", len(checkedGroupings))
+		} else if m.loadingAction == "loading-body" {
+			msg = "Loading message..."
 		} else if m.selectedGrouping != nil {
 			switch m.loadingAction {
 			case "archiving":
@@ -486,13 +606,26 @@ func (m Model) View() string {
 				specialCount++
 			}
 		}
-		return views.RenderGroupings(filtered, m.groupingsCursor, m.width, m.height, filteredChecked, int(m.groupingFilter), specialCount)
+		return views.RenderGroupings(views.GroupingsView{
+			Groupings:     filtered,
+			Cursor:        m.groupingsCursor,
+			Width:         m.width,
+			Height:        m.height,
+			Checked:       filteredChecked,
+			FilterMode:    int(m.groupingFilter),
+			SpecialCount:  specialCount,
+			PreviewOffset: m.previewOffset,
+			Status:        m.status,
+		})
 
 	case ViewSubjects:
 		if m.selectedGrouping == nil {
 			return "No grouping selected"
 		}
 		return views.RenderSubjects(m.selectedGrouping.Address, m.selectedGrouping.Messages, m.subjectsCursor, m.width, m.height, sortModeLabel(m.subjectsSortMode))
+
+	case ViewMessage:
+		return views.RenderMessage(m.selectedMessage, m.messageViewport.View(), m.messageViewport.ScrollPercent(), m.width)
 
 	case ViewConfirm:
 		if m.confirmAction == "batch-archive" {

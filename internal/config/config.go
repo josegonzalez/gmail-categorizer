@@ -17,6 +17,7 @@ type Config struct {
 	IMAP    IMAPConfig    `mapstructure:"imap"`
 	Output  OutputConfig  `mapstructure:"output"`
 	Special SpecialConfig `mapstructure:"special"`
+	Web     WebConfig     `mapstructure:"web"`
 }
 
 // IMAPConfig contains IMAP connection settings.
@@ -41,6 +42,16 @@ type OutputConfig struct {
 type SpecialConfig struct {
 	GroupByFrom []string `mapstructure:"group_by_from"`
 }
+
+// WebConfig controls the web UI server.
+type WebConfig struct {
+	// Listen is the address the web UI listens on, as host:port.
+	Listen string `mapstructure:"listen"`
+}
+
+// DefaultWebListen is the default web UI address. It is loopback only because
+// the web UI has no authentication.
+const DefaultWebListen = "127.0.0.1:8080"
 
 // Output format constants.
 const (
@@ -75,6 +86,9 @@ func SetDefaults(v *viper.Viper) {
 	v.SetDefault("output.sort_order", SortDesc)
 	v.SetDefault("output.limit", 0)
 
+	// Web UI defaults
+	v.SetDefault("web.listen", DefaultWebListen)
+
 	// Special addresses that trigger grouping by sender
 	v.SetDefault("special.group_by_from", []string{"admin@", "hi@", "email@"})
 }
@@ -99,6 +113,7 @@ func Load(v *viper.Viper, configPath string) (*Config, error) {
 	v.BindEnv("output.sort_by")
 	v.BindEnv("output.sort_order")
 	v.BindEnv("output.limit")
+	v.BindEnv("web.listen")
 
 	// Config file
 	if configPath != "" {

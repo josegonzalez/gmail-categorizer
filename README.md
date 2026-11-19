@@ -7,6 +7,7 @@ A CLI tool that connects to Gmail via IMAP and generates statistics about email 
 - Connect to Gmail via IMAP with App Password authentication
 - Generate statistics by recipient (`to`) address
 - Interactive TUI for email triage with batch archiving
+- Local web UI for browsing groupings, previewing messages and batch archiving
 - List all mailboxes/labels in your account
 - Special handling for catch-all addresses (admin@, hi@, email@) - groups by sender instead
 - Multiple output formats: table, JSON, CSV
@@ -39,7 +40,7 @@ make build
 
 ## Usage
 
-The CLI has three subcommands: `stats`, `triage`, and `mailboxes`.
+The CLI has four subcommands: `stats`, `triage`, `web`, and `mailboxes`.
 
 ### Stats Command
 
@@ -74,11 +75,56 @@ gmail-categorizer triage -u your-email@gmail.com --keychain
 ```
 
 The triage interface allows you to:
-- View emails grouped by recipient address
-- Browse subject lines within each group
+- View emails grouped by recipient address, with each grouping's destination folder
+- Preview the subjects of the highlighted grouping without opening it
+- Browse subject lines within each group, and open a message to read its body
+- Open a grouping's search in Gmail
 - Archive entire groups with a single action
 
+Groupings view keys:
+
+| Key | Action |
+| --- | --- |
+| `↑`/`k`, `↓`/`j` | Move the cursor |
+| `K`, `J` | Scroll the highlighted grouping's subject preview |
+| `space` | Select a grouping for batch archiving |
+| `enter` | View the grouping's messages |
+| `a` | Archive the selected groupings, or the highlighted one |
+| `g` | Open the grouping's search in Gmail in your browser |
+| `f` | Show all groupings, or only those grouped by sender |
+| `q` | Quit |
+
+In the messages view, `enter` opens the highlighted message, `s` cycles the sort order, `a` archives the grouping and `esc` goes back. In the message view, `↑`/`↓`/`pgup`/`pgdn` scroll the body, `a` archives the grouping and `esc` goes back to the messages. Message bodies are fetched without marking them as read; HTML-only messages are shown as plain text.
+
 When archiving, emails are moved to `automated/<local_part>` folders based on the grouping address. For example, emails grouped under `notifications@example.com` are archived to the `automated/notifications` folder.
+
+### Web Command
+
+Serve the triage workflow as a local web UI:
+
+```bash
+gmail-categorizer web -u your-email@gmail.com -k
+
+# Listen on a different port
+gmail-categorizer web -u your-email@gmail.com -k --listen 127.0.0.1:9000
+```
+
+Then open `http://127.0.0.1:8080`. The web UI lets you:
+- Skim every grouping with its message count, destination folder and a scrollable list of its subjects
+- Filter to groupings made by sender
+- Open a grouping to sort its messages, open it as a Gmail search, or archive it
+- Read a message, stepping through the grouping with previous and next
+- Select several groupings and archive them together
+
+Keyboard shortcuts: `j`/`k` move (next and previous on a message), `x` selects, `o` or `enter` opens, `e` archives, `f` toggles the filter, `s` cycles the sort and `u` goes back. Every archive asks for confirmation first. On a phone, the subject lists are hidden and the archive button moves to the bottom of the screen while groupings are selected.
+
+While an archive runs, a bar across the top of the page fills as messages are moved, with a line showing how many messages and which grouping are left. Large groupings are moved in chunks so the bar keeps moving. If an archive fails part way, the messages already moved stay archived and the rest stay in the grouping. Without JavaScript, the archive still works and the page waits until it is done.
+
+The inbox is loaded once at startup. Archiving removes groupings from the page without fetching the inbox again; use Refresh to pick up new mail. Messages are fetched without marking them as read, HTML messages are shown in a sandboxed frame, and remote images are blocked.
+
+Each request is logged to stderr with its method, path, status, response size and duration, for example `2026/11/19 09:42:01 GET /groupings/notifications@example.com 200 8312B 1.204ms`. Form contents are not logged.
+
+The web UI has no authentication and listens on `127.0.0.1` by default. Listening on any other address prints a warning, because anyone who can reach the port can read and archive your mail.
 
 ### Mailboxes Command
 
@@ -141,6 +187,15 @@ Triage command flags:
       --delete-keychain     delete stored password from keychain and exit
 ```
 
+Web command flags:
+```
+  -u, --username string     Gmail username/email address
+  -p, --password string     Gmail app password (prefer stdin or env var)
+  -k, --keychain            use OS keychain to store/retrieve password
+      --delete-keychain     delete stored password from keychain and exit
+      --listen string       address to listen on (default "127.0.0.1:8080")
+```
+
 Mailboxes command flags:
 ```
   -u, --username string     Gmail username/email address
@@ -163,6 +218,7 @@ Configuration can be provided via:
 export GMAIL_CATEGORIZER_IMAP_USERNAME="your-email@gmail.com"
 export GMAIL_CATEGORIZER_IMAP_PASSWORD="your-app-password"
 export GMAIL_CATEGORIZER_OUTPUT_FORMAT="json"
+export GMAIL_CATEGORIZER_WEB_LISTEN="127.0.0.1:8080"
 ```
 
 ### Config File
@@ -174,6 +230,9 @@ imap:
   username: your-email@gmail.com
   # password: set via env var or stdin for security
   mailbox: INBOX
+  # How long to wait for the server when connecting, logging in or
+  # selecting a mailbox (default: 30s)
+  timeout: 30s
 
 output:
   format: table
@@ -187,6 +246,9 @@ special:
     - hi@
     - email@
     - support@
+
+web:
+  listen: 127.0.0.1:8080
 ```
 
 ## Special Address Handling

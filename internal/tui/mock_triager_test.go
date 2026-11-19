@@ -3,14 +3,16 @@ package tui
 import (
 	"context"
 
+	"github.com/josegonzalez/gmail-categorizer/internal/imap"
 	"github.com/josegonzalez/gmail-categorizer/internal/triage"
 )
 
 // mockTriager implements triage.Triager for testing.
 type mockTriager struct {
-	LoadGroupingsFunc func(ctx context.Context) ([]*triage.Grouping, error)
-	LoadMessagesFunc  func(ctx context.Context, g *triage.Grouping) error
-	ArchiveFunc       func(ctx context.Context, g *triage.Grouping) (*triage.TriageResult, error)
+	LoadGroupingsFunc   func(ctx context.Context) ([]*triage.Grouping, error)
+	LoadMessagesFunc    func(ctx context.Context, g *triage.Grouping) error
+	LoadMessageBodyFunc func(ctx context.Context, g *triage.Grouping, uid uint32) (*imap.MessageBody, error)
+	ArchiveFunc         func(ctx context.Context, g *triage.Grouping) (*triage.TriageResult, error)
 }
 
 func (m *mockTriager) LoadGroupings(ctx context.Context) ([]*triage.Grouping, error) {
@@ -27,9 +29,16 @@ func (m *mockTriager) LoadMessages(ctx context.Context, g *triage.Grouping) erro
 	return nil
 }
 
-func (m *mockTriager) Archive(ctx context.Context, g *triage.Grouping) (*triage.TriageResult, error) {
+func (m *mockTriager) Archive(ctx context.Context, g *triage.Grouping, progress triage.ProgressFunc) (*triage.TriageResult, error) {
 	if m.ArchiveFunc != nil {
 		return m.ArchiveFunc(ctx, g)
 	}
 	return &triage.TriageResult{ArchivedCount: 0, DestinationFolder: ""}, nil
+}
+
+func (m *mockTriager) LoadMessageBody(ctx context.Context, g *triage.Grouping, uid uint32) (*imap.MessageBody, error) {
+	if m.LoadMessageBodyFunc != nil {
+		return m.LoadMessageBodyFunc(ctx, g, uid)
+	}
+	return &imap.MessageBody{}, nil
 }

@@ -1,0 +1,41 @@
+{{define "content"}}
+<div class="toolbar">
+  <div class="toolbar-start">
+    <a class="icon-button" href="{{.BackURL}}" aria-label="Back to {{.Address}}" data-back>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+    </a>
+    <span class="muted">{{.Address}}</span>
+  </div>
+  <div class="toolbar-end">
+    <span class="muted">{{.Position}} of {{.Total}}</span>
+    {{if .PrevURL}}<a class="icon-button" href="{{.PrevURL}}" aria-label="Previous message" data-prev>{{else}}<span class="icon-button disabled" aria-hidden="true">{{end}}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+    {{if .PrevURL}}</a>{{else}}</span>{{end}}
+    {{if .NextURL}}<a class="icon-button" href="{{.NextURL}}" aria-label="Next message" data-next>{{else}}<span class="icon-button disabled" aria-hidden="true">{{end}}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg>
+    {{if .NextURL}}</a>{{else}}</span>{{end}}
+  </div>
+</div>
+
+<article class="message">
+  <h1>{{.Subject}}</h1>
+  <dl class="headers">
+    <dt>From</dt><dd>{{.From}}</dd>
+    <dt>To</dt><dd>{{.To}}</dd>
+    {{if .Date}}<dt>Date</dt><dd>{{.Date}}</dd>{{end}}
+  </dl>
+  {{if .Text}}
+  <pre class="body-text">{{.Text}}</pre>
+  {{else if .HTMLDoc}}
+  <p class="notice">Remote images are blocked.</p>
+  <iframe class="body-html" title="Message body" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" srcdoc="{{.HTMLDoc}}"></iframe>
+  {{else}}
+  <p class="empty">This message has no readable text.</p>
+  {{end}}
+</article>
+{{end}}
+
+{{define "shortcuts"}}
+<span><kbd>j</kbd> / <kbd>k</kbd> next / previous</span>
+<span><kbd>u</kbd> back</span>
+{{end}}

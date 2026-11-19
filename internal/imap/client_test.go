@@ -85,7 +85,7 @@ func TestGmailClient_Login_NotConnected(t *testing.T) {
 	}
 
 	client := NewClient(cfg)
-	err := client.Login("user", "pass")
+	err := client.Login(context.Background(), "user", "pass")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not connected")
 }
@@ -97,7 +97,7 @@ func TestGmailClient_SelectMailbox_NotConnected(t *testing.T) {
 	}
 
 	client := NewClient(cfg)
-	info, err := client.SelectMailbox("INBOX")
+	info, err := client.SelectMailbox(context.Background(), "INBOX")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not connected")
 	assert.Nil(t, info)

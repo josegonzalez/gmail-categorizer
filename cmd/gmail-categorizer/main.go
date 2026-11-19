@@ -39,6 +39,7 @@ func main() {
 	rootCmd.AddCommand(newStatsCmd())
 	rootCmd.AddCommand(newTriageCmd())
 	rootCmd.AddCommand(newMailboxesCmd())
+	rootCmd.AddCommand(newWebCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -188,7 +189,7 @@ func connectAndLogin(ctx context.Context, cfg *config.IMAPConfig) (imap.Client, 
 	}
 
 	fmt.Fprintln(os.Stderr, "Authenticating...")
-	if err := client.Login(cfg.Username, cfg.Password); err != nil {
+	if err := client.Login(ctx, cfg.Username, cfg.Password); err != nil {
 		client.Close()
 		return nil, nil, err
 	}
@@ -284,7 +285,7 @@ func runTriage(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	// Select INBOX
-	mailboxInfo, err := client.SelectMailbox("INBOX")
+	mailboxInfo, err := client.SelectMailbox(ctx, "INBOX")
 	if err != nil {
 		return err
 	}
@@ -300,9 +301,8 @@ func runTriage(cmd *cobra.Command, args []string) error {
 	triager := triage.NewTriager(client, cfg.Special.GroupByFrom)
 
 	// Run TUI
-	return tui.Run(ctx, triager)
+	return tui.Run(ctx, triager, tui.Options{Username: cfg.IMAP.Username})
 }
-
 
 func runStats(cmd *cobra.Command, args []string) error {
 	// Bind flags to viper at runtime (avoids conflicts between subcommands)
@@ -343,7 +343,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	defer cleanup()
 
 	// Select mailbox
-	mailboxInfo, err := client.SelectMailbox(cfg.IMAP.Mailbox)
+	mailboxInfo, err := client.SelectMailbox(ctx, cfg.IMAP.Mailbox)
 	if err != nil {
 		return err
 	}
@@ -388,7 +388,6 @@ func runStats(cmd *cobra.Command, args []string) error {
 	// Output results
 	return formatter.Format(os.Stdout, results)
 }
-
 
 // handleDeleteKeychain removes the stored password from the keychain.
 func handleDeleteKeychain(username string) error {

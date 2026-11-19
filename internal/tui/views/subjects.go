@@ -32,10 +32,7 @@ func RenderSubjects(address string, messages []*imap.Message, cursor int, width,
 			subject = "(no subject)"
 		}
 
-		// Truncate if too long
-		if len(subject) > maxWidth {
-			subject = subject[:maxWidth-3] + "..."
-		}
+		subject = truncate(subject, maxWidth)
 
 		if i == cursor {
 			b.WriteString(styles.SelectedStyle.Render(subject))
@@ -46,7 +43,7 @@ func RenderSubjects(address string, messages []*imap.Message, cursor int, width,
 	}
 
 	b.WriteString("\n")
-	b.WriteString(styles.HelpStyle.Render("↑/↓ navigate • s sort • a archive all • esc back • q quit"))
+	b.WriteString(styles.HelpStyle.Render("↑/↓ navigate • enter open • s sort • a archive all • esc back • q quit"))
 
 	return b.String()
 }

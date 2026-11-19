@@ -1,0 +1,57 @@
+{{define "content"}}
+<div class="toolbar">
+  <div class="toolbar-start">
+    <a class="icon-button" href="{{.BackURL}}" aria-label="Back to groupings" data-back>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>
+    </a>
+    <form method="post" action="/archive" class="inline-form" data-archive-form>
+      <input type="hidden" name="address" value="{{.Address}}">
+      <button class="text-button" type="submit" data-archive-button>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="5" rx="1"></rect><path d="M5 9v10h14V9"></path><path d="M10 13h4"></path></svg>
+        Archive all {{.Count}}
+      </button>
+    </form>
+    <a class="text-button" href="{{.GmailURL}}" target="_blank" rel="noopener noreferrer">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"></path><path d="M20 4l-9 9"></path><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>
+      Open in Gmail
+    </a>
+  </div>
+  <form method="get" class="toolbar-end inline-form" data-sort-form>
+    <label for="sort" class="muted">Sort</label>
+    <select id="sort" name="sort" data-sort-select>
+      {{range .SortOptions}}<option value="{{.Key}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+    <button class="text-button" type="submit" data-js-hide>Apply</button>
+  </form>
+  <a href="{{.NextSortURL}}" hidden data-sort-next>Next sort</a>
+</div>
+
+<div class="page-heading">
+  <h1>{{.Address}}</h1>
+  <p class="meta">
+    <span>{{.Count}} messages</span>
+    <span>{{if .BySender}}Grouped by sender{{else}}Grouped by recipient{{end}}</span>
+    <span>Archives to <code>{{.Folder}}</code></span>
+  </p>
+</div>
+
+<ul class="messages" data-rows>
+  {{range .Messages}}
+  <li data-row>
+    <a href="{{.URL}}" data-row-link>
+      <span class="from">{{.From}}</span>
+      <span class="subject">{{.Subject}}</span>
+      <span class="date">{{.Date}}</span>
+    </a>
+  </li>
+  {{end}}
+</ul>
+{{end}}
+
+{{define "shortcuts"}}
+<span><kbd>j</kbd> / <kbd>k</kbd> move</span>
+<span><kbd>o</kbd> open</span>
+<span><kbd>s</kbd> sort</span>
+<span><kbd>e</kbd> archive</span>
+<span><kbd>u</kbd> back</span>
+{{end}}

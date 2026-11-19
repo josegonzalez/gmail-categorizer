@@ -1,0 +1,7 @@
+From: Build Service <builds@service.example>
+To: notifications@example.com
+Subject: Build passed
+Content-Type: text/plain; charset=utf-8
+
+Build #4821 passed.
+Duration: 4m 12s

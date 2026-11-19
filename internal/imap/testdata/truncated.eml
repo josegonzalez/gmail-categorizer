@@ -1,0 +1,16 @@
+From: Shop <shop@example.com>
+To: receipts@example.com
+Subject: Order
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="b2"
+
+--b2
+Content-Type: text/plain; charset=utf-8
+
+Your order shipped.
+--b2
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="label.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK

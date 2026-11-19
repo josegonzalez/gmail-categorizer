@@ -16,11 +16,14 @@ func TestDefaultKeyMap(t *testing.T) {
 	}{
 		{"Up", km.Up},
 		{"Down", km.Down},
+		{"ScrollSubjectsUp", km.ScrollSubjectsUp},
+		{"ScrollSubjectsDown", km.ScrollSubjectsDown},
 		{"Select", km.Select},
 		{"Archive", km.Archive},
 		{"Toggle", km.Toggle},
 		{"Sort", km.Sort},
 		{"Filter", km.Filter},
+		{"OpenGmail", km.OpenGmail},
 		{"Back", km.Back},
 		{"Quit", km.Quit},
 		{"Confirm", km.Confirm},
@@ -68,16 +71,20 @@ func TestDefaultKeyMap_SpecificKeys(t *testing.T) {
 	assert.Contains(t, km.Cancel.Keys(), "esc")
 
 	assert.Contains(t, km.Help.Keys(), "?")
+
+	assert.Equal(t, []string{"K"}, km.ScrollSubjectsUp.Keys())
+	assert.Equal(t, []string{"J"}, km.ScrollSubjectsDown.Keys())
+	assert.Equal(t, []string{"g"}, km.OpenGmail.Keys())
 }
 
 func TestKeyMap_ShortHelp(t *testing.T) {
 	km := DefaultKeyMap()
 	shortHelp := km.ShortHelp()
 
-	assert.Equal(t, 9, len(shortHelp), "ShortHelp should return 9 bindings")
+	assert.Equal(t, 12, len(shortHelp), "ShortHelp should return 12 bindings")
 
 	// Verify all expected bindings are included
-	expectedBindings := []key.Binding{km.Up, km.Down, km.Select, km.Archive, km.Toggle, km.Sort, km.Filter, km.Back, km.Quit}
+	expectedBindings := []key.Binding{km.Up, km.Down, km.ScrollSubjectsUp, km.ScrollSubjectsDown, km.Select, km.Archive, km.Toggle, km.Sort, km.Filter, km.OpenGmail, km.Back, km.Quit}
 	for i, binding := range expectedBindings {
 		assert.Equal(t, binding.Keys(), shortHelp[i].Keys())
 	}
@@ -90,18 +97,21 @@ func TestKeyMap_FullHelp(t *testing.T) {
 	assert.Equal(t, 3, len(fullHelp), "FullHelp should return 3 groups")
 
 	// First group: navigation
-	assert.Equal(t, 2, len(fullHelp[0]))
+	assert.Equal(t, 4, len(fullHelp[0]))
 	assert.Equal(t, km.Up.Keys(), fullHelp[0][0].Keys())
 	assert.Equal(t, km.Down.Keys(), fullHelp[0][1].Keys())
+	assert.Equal(t, km.ScrollSubjectsUp.Keys(), fullHelp[0][2].Keys())
+	assert.Equal(t, km.ScrollSubjectsDown.Keys(), fullHelp[0][3].Keys())
 
 	// Second group: actions
-	assert.Equal(t, 6, len(fullHelp[1]))
+	assert.Equal(t, 7, len(fullHelp[1]))
 	assert.Equal(t, km.Select.Keys(), fullHelp[1][0].Keys())
 	assert.Equal(t, km.Archive.Keys(), fullHelp[1][1].Keys())
 	assert.Equal(t, km.Toggle.Keys(), fullHelp[1][2].Keys())
 	assert.Equal(t, km.Sort.Keys(), fullHelp[1][3].Keys())
 	assert.Equal(t, km.Filter.Keys(), fullHelp[1][4].Keys())
-	assert.Equal(t, km.Back.Keys(), fullHelp[1][5].Keys())
+	assert.Equal(t, km.OpenGmail.Keys(), fullHelp[1][5].Keys())
+	assert.Equal(t, km.Back.Keys(), fullHelp[1][6].Keys())
 
 	// Third group: help and quit
 	assert.Equal(t, 2, len(fullHelp[2]))

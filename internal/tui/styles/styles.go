@@ -74,4 +74,8 @@ var (
 
 	SubjectStyle = lipgloss.NewStyle().
 			Foreground(MutedColor)
+
+	// PreviewStyle renders the subject list under the cursor grouping.
+	PreviewStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9CA3AF"))
 )

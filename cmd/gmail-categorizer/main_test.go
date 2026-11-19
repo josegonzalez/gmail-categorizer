@@ -104,17 +104,19 @@ func TestVersion(t *testing.T) {
 
 // mockIMAPClient implements imap.Client for testing
 type mockIMAPClient struct {
-	ConnectFunc           func(ctx context.Context) error
-	LoginFunc             func(username, password string) error
-	SelectMailboxFunc     func(name string) (*imap.MailboxInfo, error)
-	FetchMessagesFunc     func(ctx context.Context, handler imap.MessageHandler, progress imap.ProgressCallback) error
+	ConnectFunc               func(ctx context.Context) error
+	LoginFunc                 func(username, password string) error
+	SelectMailboxFunc         func(name string) (*imap.MailboxInfo, error)
+	FetchMessagesFunc         func(ctx context.Context, handler imap.MessageHandler, progress imap.ProgressCallback) error
 	FetchMessagesWithUIDsFunc func(ctx context.Context, uids []uint32, handler imap.MessageHandler) error
-	MoveMessagesFunc      func(ctx context.Context, uids []uint32, destMailbox string) error
-	ArchiveToFolderFunc   func(ctx context.Context, uids []uint32, folder string) error
-	CreateMailboxFunc     func(ctx context.Context, name string) error
-	ListMailboxesFunc     func(ctx context.Context) ([]string, error)
-	LogoutFunc            func() error
-	CloseFunc             func() error
+	FetchMessageBodyFunc      func(ctx context.Context, uid uint32) (*imap.MessageBody, error)
+	NoopFunc                  func() error
+	MoveMessagesFunc          func(ctx context.Context, uids []uint32, destMailbox string) error
+	ArchiveToFolderFunc       func(ctx context.Context, uids []uint32, folder string) error
+	CreateMailboxFunc         func(ctx context.Context, name string) error
+	ListMailboxesFunc         func(ctx context.Context) ([]string, error)
+	LogoutFunc                func() error
+	CloseFunc                 func() error
 }
 
 func (m *mockIMAPClient) Connect(ctx context.Context) error {
@@ -124,14 +126,14 @@ func (m *mockIMAPClient) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockIMAPClient) Login(username, password string) error {
+func (m *mockIMAPClient) Login(ctx context.Context, username, password string) error {
 	if m.LoginFunc != nil {
 		return m.LoginFunc(username, password)
 	}
 	return nil
 }
 
-func (m *mockIMAPClient) SelectMailbox(name string) (*imap.MailboxInfo, error) {
+func (m *mockIMAPClient) SelectMailbox(ctx context.Context, name string) (*imap.MailboxInfo, error) {
 	if m.SelectMailboxFunc != nil {
 		return m.SelectMailboxFunc(name)
 	}
@@ -223,4 +225,18 @@ func TestTriageCmd_Flags(t *testing.T) {
 
 	deleteKeychain, _ := cmd.Flags().GetBool("delete-keychain")
 	assert.False(t, deleteKeychain)
+}
+
+func (m *mockIMAPClient) FetchMessageBody(ctx context.Context, uid uint32) (*imap.MessageBody, error) {
+	if m.FetchMessageBodyFunc != nil {
+		return m.FetchMessageBodyFunc(ctx, uid)
+	}
+	return &imap.MessageBody{}, nil
+}
+
+func (m *mockIMAPClient) Noop(ctx context.Context) error {
+	if m.NoopFunc != nil {
+		return m.NoopFunc()
+	}
+	return nil
 }
