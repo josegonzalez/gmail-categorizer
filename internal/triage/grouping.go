@@ -37,6 +37,40 @@ func (g *Grouping) HasUID(uid uint32) bool {
 	return false
 }
 
+// removeUIDs drops the given messages from the grouping, keeping UIDs,
+// Messages and Count in step.
+func (g *Grouping) removeUIDs(uids []uint32) {
+	if len(uids) == 0 {
+		return
+	}
+	gone := make(map[uint32]bool, len(uids))
+	for _, uid := range uids {
+		gone[uid] = true
+	}
+
+	keptUIDs := g.UIDs[:0]
+	for _, uid := range g.UIDs {
+		if !gone[uid] {
+			keptUIDs = append(keptUIDs, uid)
+		}
+	}
+	g.UIDs = keptUIDs
+
+	keptMessages := g.Messages[:0]
+	for _, msg := range g.Messages {
+		if !gone[msg.UID] {
+			keptMessages = append(keptMessages, msg)
+		}
+	}
+	g.Messages = keptMessages
+	g.Count = len(g.UIDs)
+	if g.Count != 1 {
+		g.Subject = ""
+	} else if len(g.Messages) == 1 {
+		g.Subject = g.Messages[0].Subject
+	}
+}
+
 // GmailSearchQuery returns a Gmail search that finds this grouping's inbox
 // messages. Groupings made by sender search on the sender; the rest search on
 // the address the mail was delivered to, which is what a catch-all inbox

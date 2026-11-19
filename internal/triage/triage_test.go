@@ -3,6 +3,7 @@ package triage
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -262,12 +263,17 @@ func TestTriager_LoadMessages_Error(t *testing.T) {
 }
 
 func TestTriager_Archive(t *testing.T) {
-	var archivedUIDs []uint32
+	var created []string
+	var moved [][]uint32
 	var destFolder string
 
 	client := &mockClient{
-		ArchiveToFolderFunc: func(ctx context.Context, uids []uint32, folder string) error {
-			archivedUIDs = uids
+		CreateMailboxFunc: func(ctx context.Context, name string) error {
+			created = append(created, name)
+			return nil
+		},
+		MoveMessagesFunc: func(ctx context.Context, uids []uint32, folder string) error {
+			moved = append(moved, append([]uint32(nil), uids...))
 			destFolder = folder
 			return nil
 		},
@@ -275,40 +281,145 @@ func TestTriager_Archive(t *testing.T) {
 
 	triager := NewTriager(client, []string{})
 	grouping := &Grouping{
-		Address: "test@example.com",
-		Count:   3,
-		UIDs:    []uint32{1, 2, 3},
+		Address:  "test@example.com",
+		Count:    3,
+		UIDs:     []uint32{1, 2, 3},
+		Messages: []*imap.Message{{UID: 1}, {UID: 2}, {UID: 3}},
 	}
 
-	result, err := triager.Archive(context.Background(), grouping)
+	var progress []int
+	result, err := triager.Archive(context.Background(), grouping, func(n int) { progress = append(progress, n) })
 
 	require.NoError(t, err)
 	assert.Equal(t, 3, result.ArchivedCount)
 	assert.Equal(t, "automated/test", result.DestinationFolder)
-	assert.Equal(t, []uint32{1, 2, 3}, archivedUIDs)
+	assert.Equal(t, []string{"automated/test"}, created)
+	assert.Equal(t, [][]uint32{{1, 2, 3}}, moved, "small groupings move in one chunk")
 	assert.Equal(t, "automated/test", destFolder)
+	assert.Equal(t, []int{3}, progress)
+
+	// The grouping now holds what is left in the inbox: nothing.
+	assert.Equal(t, 0, grouping.Count)
+	assert.Empty(t, grouping.UIDs)
+	assert.Empty(t, grouping.Messages)
 }
 
-func TestTriager_Archive_Error(t *testing.T) {
-	expectedErr := errors.New("archive failed")
+func TestTriager_Archive_NilProgress(t *testing.T) {
+	triager := NewTriager(&mockClient{}, []string{})
+	grouping := &Grouping{Address: "test@example.com", Count: 1, UIDs: []uint32{1}}
+
+	result, err := triager.Archive(context.Background(), grouping, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.ArchivedCount)
+}
+
+func TestTriager_Archive_Empty(t *testing.T) {
+	called := false
 	client := &mockClient{
-		ArchiveToFolderFunc: func(ctx context.Context, uids []uint32, folder string) error {
-			return expectedErr
+		CreateMailboxFunc: func(ctx context.Context, name string) error {
+			called = true
+			return nil
+		},
+	}
+	triager := NewTriager(client, []string{})
+
+	result, err := triager.Archive(context.Background(), &Grouping{Address: "test@example.com"}, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.ArchivedCount)
+	assert.False(t, called, "nothing to archive means no server calls")
+}
+
+func TestTriager_Archive_ChunksLargeGroupings(t *testing.T) {
+	var chunks []int
+	client := &mockClient{
+		MoveMessagesFunc: func(ctx context.Context, uids []uint32, folder string) error {
+			chunks = append(chunks, len(uids))
+			return nil
 		},
 	}
 
-	triager := NewTriager(client, []string{})
-	grouping := &Grouping{
-		Address: "test@example.com",
-		Count:   1,
-		UIDs:    []uint32{1},
+	grouping := &Grouping{Address: "test@example.com"}
+	for i := 1; i <= 1000; i++ {
+		grouping.UIDs = append(grouping.UIDs, uint32(i))
 	}
+	grouping.Count = len(grouping.UIDs)
 
-	result, err := triager.Archive(context.Background(), grouping)
+	var progress []int
+	result, err := NewTriager(client, nil).Archive(context.Background(), grouping, func(n int) { progress = append(progress, n) })
+
+	require.NoError(t, err)
+	assert.Equal(t, 1000, result.ArchivedCount)
+	assert.Len(t, chunks, archiveSteps)
+	for _, c := range chunks {
+		assert.Equal(t, 50, c)
+	}
+	require.Len(t, progress, archiveSteps)
+	assert.Equal(t, 50, progress[0])
+	assert.Equal(t, 1000, progress[len(progress)-1])
+}
+
+func TestArchiveChunkSize(t *testing.T) {
+	assert.Equal(t, minArchiveChunk, archiveChunkSize(1))
+	assert.Equal(t, minArchiveChunk, archiveChunkSize(500))
+	assert.Equal(t, 26, archiveChunkSize(501))
+	assert.Equal(t, 50, archiveChunkSize(1000))
+	assert.Equal(t, 501, archiveChunkSize(10001))
+}
+
+func TestTriager_Archive_CreateMailboxError(t *testing.T) {
+	expectedErr := errors.New("no permission")
+	moveCalled := false
+	client := &mockClient{
+		CreateMailboxFunc: func(ctx context.Context, name string) error { return expectedErr },
+		MoveMessagesFunc: func(ctx context.Context, uids []uint32, folder string) error {
+			moveCalled = true
+			return nil
+		},
+	}
+	grouping := &Grouping{Address: "test@example.com", Count: 1, UIDs: []uint32{1}}
+
+	result, err := NewTriager(client, nil).Archive(context.Background(), grouping, nil)
 
 	require.Error(t, err)
+	assert.ErrorIs(t, err, expectedErr)
 	assert.Contains(t, err.Error(), "archiving")
 	assert.Nil(t, result)
+	assert.False(t, moveCalled)
+	assert.Equal(t, []uint32{1}, grouping.UIDs, "nothing was moved")
+}
+
+func TestTriager_Archive_PartialFailureKeepsUnmovedMessages(t *testing.T) {
+	expectedErr := errors.New("connection reset")
+	calls := 0
+	client := &mockClient{
+		MoveMessagesFunc: func(ctx context.Context, uids []uint32, folder string) error {
+			calls++
+			if calls == 2 {
+				return expectedErr
+			}
+			return nil
+		},
+	}
+
+	grouping := &Grouping{Address: "test@example.com"}
+	for i := 1; i <= 60; i++ {
+		grouping.UIDs = append(grouping.UIDs, uint32(i))
+		grouping.Messages = append(grouping.Messages, &imap.Message{UID: uint32(i), Subject: fmt.Sprintf("s%d", i)})
+	}
+	grouping.Count = 60
+
+	result, err := NewTriager(client, nil).Archive(context.Background(), grouping, nil)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, expectedErr)
+	require.NotNil(t, result)
+	assert.Equal(t, 25, result.ArchivedCount, "the first chunk was moved")
+	assert.Equal(t, 35, grouping.Count)
+	assert.Len(t, grouping.Messages, 35)
+	assert.Equal(t, uint32(26), grouping.UIDs[0])
+	assert.Equal(t, uint32(26), grouping.Messages[0].UID)
 }
 
 func TestTriager_LoadGroupings_KeepsEnvelopesNewestFirst(t *testing.T) {
@@ -409,7 +520,7 @@ func TestTriager_LoadMessageBody_Error(t *testing.T) {
 func TestArchiveBatch(t *testing.T) {
 	expectedErr := errors.New("archive failed")
 	client := &mockClient{
-		ArchiveToFolderFunc: func(ctx context.Context, uids []uint32, folder string) error {
+		MoveMessagesFunc: func(ctx context.Context, uids []uint32, folder string) error {
 			if folder == "automated/bad" {
 				return expectedErr
 			}
@@ -419,12 +530,13 @@ func TestArchiveBatch(t *testing.T) {
 
 	triager := NewTriager(client, []string{})
 	groupings := []*Grouping{
-		{Address: "good@example.com", UIDs: []uint32{1, 2}},
-		{Address: "bad@example.com", UIDs: []uint32{3}},
-		{Address: "also@example.com", UIDs: []uint32{4}},
+		{Address: "good@example.com", Count: 2, UIDs: []uint32{1, 2}},
+		{Address: "bad@example.com", Count: 1, UIDs: []uint32{3}},
+		{Address: "also@example.com", Count: 1, UIDs: []uint32{4}},
 	}
 
-	results := ArchiveBatch(context.Background(), triager, groupings)
+	var progress []BatchProgress
+	results := ArchiveBatch(context.Background(), triager, groupings, func(p BatchProgress) { progress = append(progress, p) })
 
 	require.Len(t, results, 3)
 	assert.Equal(t, "good@example.com", results[0].Address)
@@ -432,12 +544,22 @@ func TestArchiveBatch(t *testing.T) {
 	assert.Equal(t, 2, results[0].Result.ArchivedCount)
 	assert.Equal(t, "bad@example.com", results[1].Address)
 	assert.ErrorIs(t, results[1].Err, expectedErr)
-	assert.Nil(t, results[1].Result)
+	assert.Equal(t, 0, results[1].Result.ArchivedCount)
 	assert.Equal(t, "also@example.com", results[2].Address)
 	assert.NoError(t, results[2].Err, "a failure should not stop later groupings")
+
+	require.NotEmpty(t, progress)
+	assert.Equal(t, BatchProgress{Groupings: 3, Messages: 4}, progress[0], "reported before starting")
+	last := progress[len(progress)-1]
+	assert.Equal(t, 3, last.DoneGroupings)
+	assert.Equal(t, 4, last.DoneMessages, "a failed grouping still counts as done")
+	assert.Equal(t, "also@example.com", last.Current)
+	for i := 1; i < len(progress); i++ {
+		assert.GreaterOrEqual(t, progress[i].DoneMessages, progress[i-1].DoneMessages, "progress never goes backwards")
+	}
 }
 
 func TestArchiveBatch_Empty(t *testing.T) {
 	triager := NewTriager(&mockClient{}, []string{})
-	assert.Empty(t, ArchiveBatch(context.Background(), triager, nil))
+	assert.Empty(t, ArchiveBatch(context.Background(), triager, nil, nil))
 }

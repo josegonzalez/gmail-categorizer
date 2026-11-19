@@ -29,7 +29,7 @@ func (m *mockTriager) LoadMessages(ctx context.Context, g *triage.Grouping) erro
 	return nil
 }
 
-func (m *mockTriager) Archive(ctx context.Context, g *triage.Grouping) (*triage.TriageResult, error) {
+func (m *mockTriager) Archive(ctx context.Context, g *triage.Grouping, progress triage.ProgressFunc) (*triage.TriageResult, error) {
 	if m.ArchiveFunc != nil {
 		return m.ArchiveFunc(ctx, g)
 	}

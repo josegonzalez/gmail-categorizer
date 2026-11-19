@@ -118,6 +118,8 @@ Then open `http://127.0.0.1:8080`. The web UI lets you:
 
 Keyboard shortcuts: `j`/`k` move (next and previous on a message), `x` selects, `o` or `enter` opens, `e` archives, `f` toggles the filter, `s` cycles the sort and `u` goes back. Every archive asks for confirmation first. On a phone, the subject lists are hidden and the archive button moves to the bottom of the screen while groupings are selected.
 
+While an archive runs, a bar across the top of the page fills as messages are moved, with a line showing how many messages and which grouping are left. Large groupings are moved in chunks so the bar keeps moving. If an archive fails part way, the messages already moved stay archived and the rest stay in the grouping. Without JavaScript, the archive still works and the page waits until it is done.
+
 The inbox is loaded once at startup. Archiving removes groupings from the page without fetching the inbox again; use Refresh to pick up new mail. Messages are fetched without marking them as read, HTML messages are shown in a sandboxed frame, and remote images are blocked.
 
 Each request is logged to stderr with its method, path, status, response size and duration, for example `2026/11/19 09:42:01 GET /groupings/notifications@example.com 200 8312B 1.204ms`. Form contents are not logged.

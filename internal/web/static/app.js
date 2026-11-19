@@ -89,10 +89,129 @@
     return window.confirm("Archive every message in " + (address ? address.value : "this grouping") + "?");
   }
 
+  // Archive progress. With fetch and streams available, the archive form is
+  // sent in the background and the server streams one JSON event per line;
+  // otherwise the form posts normally and the page waits for the redirect.
+  var archiving = false;
+  var progress = document.querySelector("[data-progress]");
+  var progressBar = document.querySelector("[data-progress-bar]");
+  var progressStatus = document.querySelector("[data-progress-status]");
+  var canStream = !!(window.fetch && window.ReadableStream && window.TextDecoder && window.URLSearchParams && window.FormData);
+
+  function plural(n, one, many) {
+    return n + " " + (n === 1 ? one : many);
+  }
+
+  function showProgress(fraction, text) {
+    if (progress) {
+      progress.hidden = false;
+    }
+    if (progressBar) {
+      var pct = Math.max(2, Math.min(100, Math.round(fraction * 100)));
+      progressBar.style.width = pct + "%";
+      progressBar.setAttribute("aria-valuenow", String(pct));
+    }
+    if (progressStatus && text) {
+      progressStatus.hidden = false;
+      progressStatus.textContent = text;
+    }
+  }
+
+  function describe(e) {
+    if (e.type === "done") {
+      return "Archived " + plural(e.messages, "message", "messages") + ". Loading the inbox...";
+    }
+    var text = "Archiving " + e.doneMessages + " of " + plural(e.messages, "message", "messages");
+    if (e.current) {
+      text += e.groupings > 1
+        ? " (grouping " + Math.min(e.doneGroupings + 1, e.groupings) + " of " + e.groupings + ": " + e.current + ")"
+        : " from " + e.current;
+    }
+    return text;
+  }
+
+  function onProgress(e) {
+    var fraction = e.messages > 0 ? e.doneMessages / e.messages : (e.groupings > 0 ? e.doneGroupings / e.groupings : 1);
+    showProgress(e.type === "done" ? 1 : fraction, describe(e));
+  }
+
+  function streamArchive(form) {
+    var redirect = "/";
+    // Set once the server answers. Before that, nothing has been archived
+    // and a failed request falls back to a normal form post.
+    var started = false;
+    archiving = true;
+    document.body.classList.add("archiving");
+    showProgress(0, "Starting the archive...");
+
+    fetch(form.getAttribute("action"), {
+      method: "POST",
+      body: new URLSearchParams(new FormData(form)),
+      headers: { Accept: "application/x-ndjson" },
+      credentials: "same-origin"
+    }).then(function (res) {
+      started = true;
+      var type = res.headers.get("Content-Type") || "";
+      if (!res.ok || type.indexOf("application/x-ndjson") < 0 || !res.body) {
+        // The server answered before archiving anything, usually with an
+        // error page. Submit normally so the browser shows it.
+        archiving = false;
+        form.submit();
+        return null;
+      }
+
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = "";
+      function pump() {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) {
+            return;
+          }
+          buffer += decoder.decode(chunk.value, { stream: true });
+          var newline;
+          while ((newline = buffer.indexOf("\n")) >= 0) {
+            var line = buffer.slice(0, newline).trim();
+            buffer = buffer.slice(newline + 1);
+            if (!line) {
+              continue;
+            }
+            var event = JSON.parse(line);
+            if (event.redirect) {
+              redirect = event.redirect;
+            }
+            onProgress(event);
+          }
+          return pump();
+        });
+      }
+      return pump().then(function () { return redirect; });
+    }).catch(function () {
+      if (!started) {
+        archiving = false;
+        form.submit();
+        return null;
+      }
+      // The connection dropped, but the archive keeps running on the server;
+      // the inbox page loads once it has finished.
+      showProgress(1, "Lost the connection. Waiting for the archive to finish...");
+      return redirect;
+    }).then(function (target) {
+      if (target) {
+        window.location.href = target;
+      }
+    });
+  }
+
   Array.prototype.forEach.call(document.querySelectorAll("[data-archive-form]"), function (form) {
     form.addEventListener("submit", function (event) {
-      if (!confirmArchive(form)) {
+      if (archiving || !confirmArchive(form)) {
         event.preventDefault();
+        return;
+      }
+      if (canStream) {
+        event.preventDefault();
+        streamArchive(form);
       }
     });
   });
@@ -136,6 +255,9 @@
       return;
     }
 
+    if (archiving) {
+      return;
+    }
     var row = focusedRow();
     switch (event.key) {
       case "j":
@@ -181,7 +303,10 @@
             updateSelection();
           }
         }
-        if (confirmArchive(form)) {
+        // requestSubmit runs the submit handler: confirmation and progress.
+        if (form.requestSubmit) {
+          form.requestSubmit();
+        } else if (confirmArchive(form)) {
           form.submit();
         }
         break;

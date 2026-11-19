@@ -501,7 +501,7 @@ func (m Model) doArchive() tea.Msg {
 	if m.selectedGrouping == nil {
 		return errMsg{fmt.Errorf("no grouping selected")}
 	}
-	result, err := m.triager.Archive(m.ctx, m.selectedGrouping)
+	result, err := m.triager.Archive(m.ctx, m.selectedGrouping, nil)
 	if err != nil {
 		return errMsg{err}
 	}
@@ -563,7 +563,7 @@ func (m Model) doBatchArchive() tea.Msg {
 	if len(groupings) == 0 {
 		return errMsg{fmt.Errorf("no groupings selected")}
 	}
-	return batchArchiveResultMsg{triage.ArchiveBatch(m.ctx, m.triager, groupings)}
+	return batchArchiveResultMsg{triage.ArchiveBatch(m.ctx, m.triager, groupings, nil)}
 }
 
 // View renders the current view.

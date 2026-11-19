@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/josegonzalez/gmail-categorizer/internal/imap"
 )
 
 func TestGrouping_DestinationFolder(t *testing.T) {
@@ -107,4 +110,22 @@ func TestGrouping_GmailSearchURL(t *testing.T) {
 	assert.Equal(t,
 		"https://mail.google.com/mail/#search/deliveredto:user%2Btag@example.com%20in:inbox",
 		g.GmailSearchURL(""))
+}
+
+func TestGrouping_removeUIDs(t *testing.T) {
+	g := &Grouping{
+		Count:    3,
+		UIDs:     []uint32{1, 2, 3},
+		Messages: []*imap.Message{{UID: 3, Subject: "c"}, {UID: 2, Subject: "b"}, {UID: 1, Subject: "a"}},
+	}
+
+	g.removeUIDs([]uint32{1, 3})
+
+	assert.Equal(t, 1, g.Count)
+	assert.Equal(t, []uint32{2}, g.UIDs)
+	require.Len(t, g.Messages, 1)
+	assert.Equal(t, "b", g.Subject, "a single remaining message shows its subject")
+
+	g.removeUIDs(nil)
+	assert.Equal(t, 1, g.Count)
 }

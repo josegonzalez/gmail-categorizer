@@ -397,6 +397,7 @@ func TestSecurityHeaders(t *testing.T) {
 		rec := env.get(t, target)
 		csp := rec.Header().Get("Content-Security-Policy")
 		assert.Contains(t, csp, "script-src 'self'", target)
+		assert.Contains(t, csp, "connect-src 'self'", target, "the page streams archive progress with fetch")
 		assert.Contains(t, csp, "img-src 'self' data:", target)
 		assert.Contains(t, csp, "frame-ancestors 'none'", target)
 		assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"), target)

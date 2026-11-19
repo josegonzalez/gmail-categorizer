@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/josegonzalez/gmail-categorizer/internal/imap"
@@ -17,6 +18,10 @@ type mockClient struct {
 	fetchErr   error
 	bodyErr    error
 	archiveErr map[string]error
+
+	// failMoveCall makes the nth MoveMessages call (1-based) fail.
+	failMoveCall int
+	moveCalls    int
 
 	fetchCalls int
 	bodyCalls  []uint32
@@ -67,13 +72,17 @@ func (m *mockClient) FetchMessageBody(ctx context.Context, uid uint32) (*imap.Me
 	return &imap.MessageBody{}, nil
 }
 
-func (m *mockClient) MoveMessages(ctx context.Context, uids []uint32, dest string) error {
-	return nil
+func (m *mockClient) ArchiveToFolder(ctx context.Context, uids []uint32, folder string) error {
+	return m.MoveMessages(ctx, uids, folder)
 }
 
-func (m *mockClient) ArchiveToFolder(ctx context.Context, uids []uint32, folder string) error {
+func (m *mockClient) MoveMessages(ctx context.Context, uids []uint32, folder string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.moveCalls++
+	if m.failMoveCall == m.moveCalls {
+		return errors.New("connection reset")
+	}
 	if err := m.archiveErr[folder]; err != nil {
 		return err
 	}

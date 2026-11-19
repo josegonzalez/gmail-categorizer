@@ -32,6 +32,7 @@ var staticFS embed.FS
 // sandbox blocks scripts.
 const contentSecurityPolicy = "default-src 'none'; " +
 	"script-src 'self'; " +
+	"connect-src 'self'; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"img-src 'self' data:; " +
 	"font-src 'self'; " +
@@ -271,31 +272,48 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	redirect := "/" + filterQuery(r.PostForm.Get("filter"))
+
+	// With JavaScript the page asks for progress events instead of a
+	// redirect, and shows them as a bar across the top of the page.
+	var stream *progressStream
+	if wantsProgress(r) {
+		stream = newProgressStream(w)
+	}
+
 	f := &flash{Missing: missing}
 	if len(targets) > 0 {
+		var onProgress triage.BatchProgressFunc
+		if stream != nil {
+			onProgress = stream.progress
+		}
 		// Finish an archive even if the browser goes away: stopping part way
 		// through a move can leave messages copied but still in the inbox.
-		results := triage.ArchiveBatch(context.WithoutCancel(r.Context()), s.session.Triager(), targets)
-		archived := make(map[string]bool)
+		results := triage.ArchiveBatch(context.WithoutCancel(r.Context()), s.session.Triager(), targets, onProgress)
 		for _, res := range results {
 			if res.Err != nil {
 				s.opts.Logger.Printf("archiving %s: %v", res.Address, res.Err)
 				f.Failed = append(f.Failed, res)
 				continue
 			}
-			archived[res.Address] = true
 			f.Archived = append(f.Archived, res)
 			if res.Result != nil {
 				f.ArchivedCount += res.Result.ArchivedCount
 			}
 		}
-		s.removeGroupings(archived)
+		// Archive leaves each grouping holding only the messages still in
+		// the inbox, so fully archived groupings are now empty.
+		s.removeEmptyGroupings()
 	}
 	if len(f.Archived) > 0 || len(f.Failed) > 0 || len(f.Missing) > 0 {
 		s.flash = f
 	}
 
-	http.Redirect(w, r, "/"+filterQuery(r.PostForm.Get("filter")), http.StatusSeeOther)
+	if stream != nil {
+		stream.done(redirect)
+		return
+	}
+	http.Redirect(w, r, redirect, http.StatusSeeOther)
 }
 
 func (s *Server) handleGrouping(w http.ResponseWriter, r *http.Request) {
@@ -424,12 +442,12 @@ func (s *Server) findGrouping(address string) *triage.Grouping {
 	return nil
 }
 
-// removeGroupings drops archived groupings from the cache. The caller holds
-// s.mu.
-func (s *Server) removeGroupings(addresses map[string]bool) {
+// removeEmptyGroupings drops groupings with nothing left in the inbox from
+// the cache. The caller holds s.mu.
+func (s *Server) removeEmptyGroupings() {
 	kept := s.groupings[:0]
 	for _, g := range s.groupings {
-		if !addresses[g.Address] {
+		if g.Count > 0 {
 			kept = append(kept, g)
 		}
 	}
@@ -458,7 +476,12 @@ func (s *Server) takeFlash() *flashView {
 			strings.Join(folders, ", "))
 	}
 	for _, res := range f.Failed {
-		v.Failed = append(v.Failed, fmt.Sprintf("%s: %v", res.Address, res.Err))
+		msg := fmt.Sprintf("%s: %v", res.Address, res.Err)
+		if res.Result != nil && res.Result.ArchivedCount > 0 {
+			msg += fmt.Sprintf(" (%s moved to %s before the error)",
+				plural(res.Result.ArchivedCount, "message was", "messages were"), res.Result.DestinationFolder)
+		}
+		v.Failed = append(v.Failed, msg)
 	}
 	return v
 }
