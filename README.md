@@ -228,6 +228,9 @@ imap:
   username: your-email@gmail.com
   # password: set via env var or stdin for security
   mailbox: INBOX
+  # How long to wait for the server when connecting, logging in or
+  # selecting a mailbox (default: 30s)
+  timeout: 30s
 
 output:
   format: table

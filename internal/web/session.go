@@ -37,7 +37,7 @@ func NewSession(dial DialFunc, newTriager TriagerFunc) *Session {
 // because the server's UIDVALIDITY changed across a reconnect.
 func (s *Session) Ensure(ctx context.Context) (uidsInvalidated bool, err error) {
 	if s.client != nil {
-		if err := s.client.Noop(); err == nil {
+		if err := s.client.Noop(ctx); err == nil {
 			return false, nil
 		}
 		// The connection is gone; Logout would fail too.

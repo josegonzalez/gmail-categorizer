@@ -24,10 +24,10 @@ type mockClient struct {
 	closed     bool
 }
 
-func (m *mockClient) Connect(ctx context.Context) error     { return nil }
-func (m *mockClient) Login(username, password string) error { return nil }
+func (m *mockClient) Connect(ctx context.Context) error                          { return nil }
+func (m *mockClient) Login(ctx context.Context, username, password string) error { return nil }
 
-func (m *mockClient) SelectMailbox(name string) (*imap.MailboxInfo, error) {
+func (m *mockClient) SelectMailbox(ctx context.Context, name string) (*imap.MailboxInfo, error) {
 	return &imap.MailboxInfo{Name: name, NumMessages: uint32(len(m.messages))}, nil
 }
 
@@ -101,7 +101,7 @@ func (m *mockClient) CreateMailbox(ctx context.Context, name string) error { ret
 
 func (m *mockClient) ListMailboxes(ctx context.Context) ([]string, error) { return nil, nil }
 
-func (m *mockClient) Noop() error {
+func (m *mockClient) Noop(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.noopErr

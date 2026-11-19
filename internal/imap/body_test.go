@@ -109,5 +109,5 @@ func TestGmailClient_FetchMessageBody_NotConnected(t *testing.T) {
 
 func TestGmailClient_Noop_NotConnected(t *testing.T) {
 	client := &gmailClient{}
-	assert.Error(t, client.Noop())
+	assert.Error(t, client.Noop(t.Context()))
 }

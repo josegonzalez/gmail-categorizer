@@ -273,7 +273,9 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 
 	f := &flash{Missing: missing}
 	if len(targets) > 0 {
-		results := triage.ArchiveBatch(r.Context(), s.session.Triager(), targets)
+		// Finish an archive even if the browser goes away: stopping part way
+		// through a move can leave messages copied but still in the inbox.
+		results := triage.ArchiveBatch(context.WithoutCancel(r.Context()), s.session.Triager(), targets)
 		archived := make(map[string]bool)
 		for _, res := range results {
 			if res.Err != nil {

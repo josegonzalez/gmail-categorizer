@@ -2,8 +2,11 @@ package imap
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"time"
 
@@ -16,8 +19,8 @@ import (
 // Client defines the interface for IMAP operations.
 type Client interface {
 	Connect(ctx context.Context) error
-	Login(username, password string) error
-	SelectMailbox(name string) (*MailboxInfo, error)
+	Login(ctx context.Context, username, password string) error
+	SelectMailbox(ctx context.Context, name string) (*MailboxInfo, error)
 	FetchMessages(ctx context.Context, handler MessageHandler, progress ProgressCallback) error
 	FetchMessagesWithUIDs(ctx context.Context, uids []uint32, handler MessageHandler) error
 	FetchMessageBody(ctx context.Context, uid uint32) (*MessageBody, error)
@@ -25,7 +28,7 @@ type Client interface {
 	ArchiveToFolder(ctx context.Context, uids []uint32, folder string) error
 	CreateMailbox(ctx context.Context, name string) error
 	ListMailboxes(ctx context.Context) ([]string, error)
-	Noop() error
+	Noop(ctx context.Context) error
 	Logout() error
 	Close() error
 }
@@ -50,18 +53,84 @@ func (c *gmailClient) requireConnected() error {
 	return nil
 }
 
-// Connect establishes a TLS connection to the IMAP server.
-func (c *gmailClient) Connect(ctx context.Context) error {
-	addr := fmt.Sprintf("%s:%d", c.config.Server, c.config.Port)
+// defaultCommandTimeout applies when the config sets no timeout.
+const defaultCommandTimeout = 30 * time.Second
 
-	options := &imapclient.Options{
-		// Enable debug logging if needed
-		// DebugWriter: os.Stderr,
+// commandTimeout is how long short commands (connecting, logging in,
+// selecting a mailbox, NOOP and LOGOUT) may wait for the server.
+func (c *gmailClient) commandTimeout() time.Duration {
+	if c.config == nil || c.config.Timeout <= 0 {
+		return defaultCommandTimeout
+	}
+	return c.config.Timeout
+}
+
+// guard runs fn, which blocks on the IMAP connection, and gives up when ctx
+// is cancelled or, if timeout is non-zero, when timeout passes. Giving up
+// closes the connection: that is the only way to unblock a command waiting on
+// the server, and a command abandoned part way leaves the session in an
+// unknown state anyway. Long operations such as fetching the whole inbox pass
+// a zero timeout so they can only be cancelled.
+func (c *gmailClient) guard(ctx context.Context, timeout time.Duration, op string, fn func() error) error {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
 
-	var err error
-	c.client, err = imapclient.DialTLS(addr, options)
+	client := c.client
+	stop := context.AfterFunc(ctx, func() {
+		if client != nil {
+			_ = client.Close()
+		}
+	})
+	err := fn()
+	if !stop() {
+		// ctx ended while fn was running and the connection was closed.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			server := "the server"
+			if c.config != nil && c.config.Server != "" {
+				server = c.config.Server
+			}
+			return fmt.Errorf("%s: no response from %s within %s: %w", op, server, timeout, ctx.Err())
+		}
+		return fmt.Errorf("%s: %w", op, ctx.Err())
+	}
+	return err
+}
+
+// Connect establishes a TLS connection to the IMAP server and waits for its
+// greeting.
+func (c *gmailClient) Connect(ctx context.Context) error {
+	addr := fmt.Sprintf("%s:%d", c.config.Server, c.config.Port)
+	timeout := c.commandTimeout()
+
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	dialer := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: timeout},
+		Config:    &tls.Config{NextProtos: []string{"imap"}},
+	}
+	conn, err := dialer.DialContext(dialCtx, "tcp", addr)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("connecting to %s: no response within %s: %w", addr, timeout, err)
+		}
+		return fmt.Errorf("connecting to %s: %w", addr, err)
+	}
+
+	c.client = imapclient.New(conn, &imapclient.Options{
+		// Enable debug logging if needed
+		// DebugWriter: os.Stderr,
+	})
+
+	err = c.guard(ctx, timeout, "waiting for server greeting", func() error {
+		return c.client.WaitGreeting()
+	})
+	if err != nil {
+		_ = c.client.Close()
+		c.client = nil
 		return fmt.Errorf("connecting to %s: %w", addr, err)
 	}
 
@@ -69,13 +138,15 @@ func (c *gmailClient) Connect(ctx context.Context) error {
 }
 
 // Login authenticates with the IMAP server.
-func (c *gmailClient) Login(username, password string) error {
+func (c *gmailClient) Login(ctx context.Context, username, password string) error {
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
 
-	cmd := c.client.Login(username, password)
-	if err := cmd.Wait(); err != nil {
+	err := c.guard(ctx, c.commandTimeout(), "authenticating", func() error {
+		return c.client.Login(username, password).Wait()
+	})
+	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
@@ -83,13 +154,17 @@ func (c *gmailClient) Login(username, password string) error {
 }
 
 // SelectMailbox selects a mailbox for reading.
-func (c *gmailClient) SelectMailbox(name string) (*MailboxInfo, error) {
+func (c *gmailClient) SelectMailbox(ctx context.Context, name string) (*MailboxInfo, error) {
 	if err := c.requireConnected(); err != nil {
 		return nil, err
 	}
 
-	cmd := c.client.Select(name, nil)
-	data, err := cmd.Wait()
+	var data *imap.SelectData
+	err := c.guard(ctx, c.commandTimeout(), "selecting mailbox", func() error {
+		var err error
+		data, err = c.client.Select(name, nil).Wait()
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("selecting mailbox %q: %w", name, err)
 	}
@@ -103,8 +178,8 @@ func (c *gmailClient) SelectMailbox(name string) (*MailboxInfo, error) {
 	}, nil
 }
 
-// FetchMessages retrieves all messages from the selected mailbox.
-func (c *gmailClient) FetchMessages(ctx context.Context, handler MessageHandler, progress ProgressCallback) error {
+// fetchMessages retrieves all messages from the selected mailbox.
+func (c *gmailClient) fetchMessages(ctx context.Context, handler MessageHandler, progress ProgressCallback) error {
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
@@ -221,25 +296,31 @@ func convertAddresses(addrs []imap.Address) []Address {
 	return result
 }
 
-// Noop sends a NOOP command, which fails when the connection has dropped.
-func (c *gmailClient) Noop() error {
+// Noop sends a NOOP command, which fails when the connection has dropped or
+// the server stops responding.
+func (c *gmailClient) Noop(ctx context.Context) error {
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
-	if err := c.client.Noop().Wait(); err != nil {
+	err := c.guard(ctx, c.commandTimeout(), "checking connection", func() error {
+		return c.client.Noop().Wait()
+	})
+	if err != nil {
 		return fmt.Errorf("checking connection: %w", err)
 	}
 	return nil
 }
 
-// Logout logs out from the IMAP server.
+// Logout logs out from the IMAP server. It gives up after the command
+// timeout so a stalled server cannot block shutdown.
 func (c *gmailClient) Logout() error {
 	if c.client == nil {
 		return nil
 	}
 
-	cmd := c.client.Logout()
-	return cmd.Wait()
+	return c.guard(context.Background(), c.commandTimeout(), "logging out", func() error {
+		return c.client.Logout().Wait()
+	})
 }
 
 // Close closes the connection to the IMAP server.
@@ -259,8 +340,8 @@ func WithTimeout(ctx context.Context, timeout time.Duration) (context.Context, c
 	return context.WithTimeout(ctx, timeout)
 }
 
-// FetchMessagesWithUIDs retrieves specific messages by UID.
-func (c *gmailClient) FetchMessagesWithUIDs(ctx context.Context, uids []uint32, handler MessageHandler) error {
+// fetchMessagesWithUIDs retrieves specific messages by UID.
+func (c *gmailClient) fetchMessagesWithUIDs(ctx context.Context, uids []uint32, handler MessageHandler) error {
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
@@ -307,10 +388,10 @@ func (c *gmailClient) FetchMessagesWithUIDs(ctx context.Context, uids []uint32, 
 	return fetchCmd.Close()
 }
 
-// FetchMessageBody retrieves and parses the body of a single message by UID.
+// fetchMessageBody retrieves and parses the body of a single message by UID.
 // It uses BODY.PEEK so viewing a message does not mark it as read, and fetches
 // at most MaxBodySize bytes.
-func (c *gmailClient) FetchMessageBody(ctx context.Context, uid uint32) (*MessageBody, error) {
+func (c *gmailClient) fetchMessageBody(ctx context.Context, uid uint32) (*MessageBody, error) {
 	if err := c.requireConnected(); err != nil {
 		return nil, err
 	}
@@ -366,8 +447,8 @@ func (c *gmailClient) FetchMessageBody(ctx context.Context, uid uint32) (*Messag
 	return body, nil
 }
 
-// ListMailboxes returns all available mailboxes.
-func (c *gmailClient) ListMailboxes(ctx context.Context) ([]string, error) {
+// listMailboxes returns all available mailboxes.
+func (c *gmailClient) listMailboxes(ctx context.Context) ([]string, error) {
 	if err := c.requireConnected(); err != nil {
 		return nil, err
 	}
@@ -397,8 +478,8 @@ func (c *gmailClient) ListMailboxes(ctx context.Context) ([]string, error) {
 	return mailboxes, nil
 }
 
-// MoveMessages moves messages by UID to another mailbox.
-func (c *gmailClient) MoveMessages(ctx context.Context, uids []uint32, destMailbox string) error {
+// moveMessages moves messages by UID to another mailbox.
+func (c *gmailClient) moveMessages(ctx context.Context, uids []uint32, destMailbox string) error {
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
@@ -437,9 +518,9 @@ func (c *gmailClient) MoveMessages(ctx context.Context, uids []uint32, destMailb
 	return nil
 }
 
-// CreateMailbox creates a new mailbox/folder.
+// createMailbox creates a new mailbox/folder.
 // It handles "already exists" errors gracefully.
-func (c *gmailClient) CreateMailbox(ctx context.Context, name string) error {
+func (c *gmailClient) createMailbox(ctx context.Context, name string) error {
 	if err := c.requireConnected(); err != nil {
 		return err
 	}
@@ -477,4 +558,72 @@ func (c *gmailClient) ArchiveToFolder(ctx context.Context, uids []uint32, folder
 
 	// Move messages to the folder
 	return c.MoveMessages(ctx, uids, folder)
+}
+
+// FetchMessages is cancelled with ctx.
+func (c *gmailClient) FetchMessages(ctx context.Context, handler MessageHandler, progress ProgressCallback) error {
+	if err := c.requireConnected(); err != nil {
+		return err
+	}
+	return c.guard(ctx, 0, "fetching messages", func() error {
+		return c.fetchMessages(ctx, handler, progress)
+	})
+}
+
+// FetchMessagesWithUIDs is cancelled with ctx.
+func (c *gmailClient) FetchMessagesWithUIDs(ctx context.Context, uids []uint32, handler MessageHandler) error {
+	if err := c.requireConnected(); err != nil {
+		return err
+	}
+	return c.guard(ctx, 0, "fetching messages", func() error {
+		return c.fetchMessagesWithUIDs(ctx, uids, handler)
+	})
+}
+
+// MoveMessages is cancelled with ctx.
+func (c *gmailClient) MoveMessages(ctx context.Context, uids []uint32, destMailbox string) error {
+	if err := c.requireConnected(); err != nil {
+		return err
+	}
+	return c.guard(ctx, 0, "moving messages", func() error {
+		return c.moveMessages(ctx, uids, destMailbox)
+	})
+}
+
+// CreateMailbox is cancelled with ctx and times out after the command timeout.
+func (c *gmailClient) CreateMailbox(ctx context.Context, name string) error {
+	if err := c.requireConnected(); err != nil {
+		return err
+	}
+	return c.guard(ctx, c.commandTimeout(), "creating mailbox", func() error {
+		return c.createMailbox(ctx, name)
+	})
+}
+
+// FetchMessageBody is cancelled with ctx.
+func (c *gmailClient) FetchMessageBody(ctx context.Context, uid uint32) (*MessageBody, error) {
+	if err := c.requireConnected(); err != nil {
+		return nil, err
+	}
+	var result *MessageBody
+	err := c.guard(ctx, 0, "fetching message body", func() error {
+		var err error
+		result, err = c.fetchMessageBody(ctx, uid)
+		return err
+	})
+	return result, err
+}
+
+// ListMailboxes is cancelled with ctx.
+func (c *gmailClient) ListMailboxes(ctx context.Context) ([]string, error) {
+	if err := c.requireConnected(); err != nil {
+		return nil, err
+	}
+	var result []string
+	err := c.guard(ctx, 0, "listing mailboxes", func() error {
+		var err error
+		result, err = c.listMailboxes(ctx)
+		return err
+	})
+	return result, err
 }

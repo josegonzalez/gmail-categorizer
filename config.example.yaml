@@ -18,7 +18,9 @@ imap:
   # For all mail: "[Gmail]/All Mail"
   mailbox: INBOX
 
-  # Connection timeout
+  # How long to wait for the server when connecting, logging in, selecting a
+  # mailbox or checking the connection before giving up (default: 30s).
+  # Fetching messages has no time limit but can always be stopped with Ctrl+C.
   timeout: 30s
 
 output:

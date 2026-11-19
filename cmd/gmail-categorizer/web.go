@@ -72,8 +72,12 @@ func runWeb(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("password is required (set via --password, GMAIL_CATEGORIZER_IMAP_PASSWORD, stdin, or config file)")
 	}
 
+	// The first Ctrl+C cancels ctx, which stops any IMAP command in flight and
+	// shuts the server down. Restoring the default handler right away means a
+	// second Ctrl+C always exits immediately.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	context.AfterFunc(ctx, stop)
 
 	session := web.NewSession(
 		inboxDialer(&cfg.IMAP),
@@ -140,7 +144,7 @@ func inboxDialer(cfg *config.IMAPConfig) web.DialFunc {
 			return nil, nil, err
 		}
 
-		info, err := client.SelectMailbox("INBOX")
+		info, err := client.SelectMailbox(ctx, "INBOX")
 		if err != nil {
 			cleanup()
 			return nil, nil, err

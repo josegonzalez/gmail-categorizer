@@ -50,7 +50,7 @@ func newTestEnv(t *testing.T, client *mockClient) *testEnv {
 	session := NewSession(
 		func(ctx context.Context) (imap.Client, *imap.MailboxInfo, error) {
 			env.dials++
-			info, _ := env.client.SelectMailbox("INBOX")
+			info, _ := env.client.SelectMailbox(ctx, "INBOX")
 			info.UIDValidity = 1
 			return env.client, info, nil
 		},

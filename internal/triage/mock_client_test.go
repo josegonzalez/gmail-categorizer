@@ -30,14 +30,14 @@ func (m *mockClient) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (m *mockClient) Login(username, password string) error {
+func (m *mockClient) Login(ctx context.Context, username, password string) error {
 	if m.LoginFunc != nil {
 		return m.LoginFunc(username, password)
 	}
 	return nil
 }
 
-func (m *mockClient) SelectMailbox(name string) (*imap.MailboxInfo, error) {
+func (m *mockClient) SelectMailbox(ctx context.Context, name string) (*imap.MailboxInfo, error) {
 	if m.SelectMailboxFunc != nil {
 		return m.SelectMailboxFunc(name)
 	}
@@ -107,7 +107,7 @@ func (m *mockClient) FetchMessageBody(ctx context.Context, uid uint32) (*imap.Me
 	return &imap.MessageBody{}, nil
 }
 
-func (m *mockClient) Noop() error {
+func (m *mockClient) Noop(ctx context.Context) error {
 	if m.NoopFunc != nil {
 		return m.NoopFunc()
 	}
