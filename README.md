@@ -116,6 +116,29 @@ Then open `http://127.0.0.1:8080`. The web UI lets you:
 - Read a message, stepping through the grouping with previous and next
 - Select several groupings and archive them together
 
+<table>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src=".github/assets/screenshots/groupings.png" alt="Groupings list with subject previews"><br>
+      <sub>Groupings list with subject previews</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src=".github/assets/screenshots/grouping.png" alt="A grouping's messages"><br>
+      <sub>A grouping's messages</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="50%">
+      <img src=".github/assets/screenshots/message.png" alt="A message open in the web UI"><br>
+      <sub>A message open in the web UI</sub>
+    </td>
+    <td align="center" valign="top" width="50%">
+      <img src=".github/assets/screenshots/mobile.png" alt="Groupings list on a phone" width="160"><br>
+      <sub>Groupings list on a phone</sub>
+    </td>
+  </tr>
+</table>
+
 Keyboard shortcuts: `j`/`k` move (next and previous on a message), `x` selects, `o` or `enter` opens, `e` archives, `f` toggles the filter, `s` cycles the sort and `u` goes back. Every archive asks for confirmation first. On a phone, the subject lists are hidden and the archive button moves to the bottom of the screen while groupings are selected.
 
 While an archive runs, a bar across the top of the page fills as messages are moved, with a line showing how many messages and which grouping are left. Large groupings are moved in chunks so the bar keeps moving. If an archive fails part way, the messages already moved stay archived and the rest stay in the grouping. Without JavaScript, the archive still works and the page waits until it is done.
